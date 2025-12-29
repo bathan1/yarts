@@ -63,7 +63,7 @@ If you've installed the API via the `make install` command, you can use the help
 in standalone code by compiling with the `-lyapi` flag. To compile the queue printer example script:
 
 ```
-gcc bassoon_print.c -lyarts
+gcc stream_print.c -lyarts
 ```
 
 ## Documentation
