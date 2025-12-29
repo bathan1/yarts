@@ -7,7 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
-int bhop(FILE *files[2]) {
+int stream(FILE *files[2]) {
     struct deque8 *dq = calloc(1, sizeof(struct deque8));
     if (!dq) {
         return perror_rc(-1, "calloc", deque8_free(dq));
@@ -62,8 +62,8 @@ FILE *fetch(const char *url, const char *init[4]) {
     fs->reading_chunk_size = true;
     fs->chunk_line_len = 0;
 
-    if (bhop(fs->bass)) {
-        return perror_rc(NULL, "bhop()", close(appfd));
+    if (stream(fs->stream)) {
+        return perror_rc(NULL, "stream()", close(appfd));
     }
 
     fs->http_done = false;

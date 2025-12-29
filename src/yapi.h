@@ -25,9 +25,9 @@
 static const char *FRAME_NDJSON = 0;
 
 /**
- * @brief Initialize a write/read pipe over a #bassoon queue.
+ * @brief Make FILES[1] write to readable FILES[0].
  *
- * Bassoon Handle Open Pipe, or #bhop(), opens a unidirectional
+ * Buffer Handle Open Pipe, or #bhop(), opens a unidirectional
  * pipe where you write into `FILES[0]` and read from `FILES[1]`,
  * just like posix pipes.
  *
@@ -37,7 +37,7 @@ static const char *FRAME_NDJSON = 0;
  * ### Example with manual JSON
  * @snippet bhop_print.c bhop basic usage
  */
-int bhop(FILE *files[2]);
+int stream(FILE *files[2]);
 
 /**
  * @brief \c send() HTTP Request over a TCP socket, wrapping the response socket over

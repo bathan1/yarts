@@ -158,7 +158,7 @@ static void handle_http_body_bytes(struct fetch_state *st,
 static void handle_http_body(struct fetch_state *st);
 
 static bool flush_pending(struct fetch_state *st);
-static void flush_bassoon(struct fetch_state *st);
+static void flush_streamoon(struct fetch_state *st);
 
 void *fetcher(void *arg) {
     struct fetch_state *fs = arg;
@@ -188,14 +188,14 @@ void *fetcher(void *arg) {
         }
     }
 
-    fclose(fs->bass[0]);
-    fs->bass[0] = NULL;
+    fclose(fs->stream[0]);
+    fs->stream[0] = NULL;
 
     /* There may still be unflushed parsed objects */
-    flush_bassoon(fs);
+    flush_streamoon(fs);
 
-    fclose(fs->bass[1]);
-    fs->bass[1] = NULL;
+    fclose(fs->stream[1]);
+    fs->stream[1] = NULL;
 
     ttcp_tls_free(fs->ssl, fs->ssl_ctx);
 
@@ -348,8 +348,8 @@ static void handle_http_body_bytes(struct fetch_state *st,
 
             size_t to_copy = (available < need) ? available : need;
 
-            // Feed payload bytes to bassoon parser
-            fwrite(data + i, 1, to_copy, st->bass[0]);
+            // Feed payload bytes to streamoon parser
+            fwrite(data + i, 1, to_copy, st->stream[0]);
 
             i += to_copy;
             st->current_chunk_size -= to_copy;
@@ -509,8 +509,8 @@ static bool flush_pending(struct fetch_state *st) {
     return true; // pending fully flushed
 }
 
-static void flush_bassoon(struct fetch_state *st) {
-    FILE *rd = st->bass[1];
+static void flush_streamoon(struct fetch_state *st) {
+    FILE *rd = st->stream[1];
     int out = st->outfd;
 
     /* 1. Handle pending partial send */

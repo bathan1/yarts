@@ -20,8 +20,7 @@ To build using the Makefile, you need the following libraries installed onto you
 To install yajl and libcurl Ubuntu, for example:
 
 ```bash
-sudo apt install libcurl4-openssl-dev
-sudo apt install libyajl-dev
+sudo apt install libsqlite3-dev openssl libcurl4-openssl-dev libyajl-dev
 ```
 
 yyjson isn't available on apt, so we have to build from source:
