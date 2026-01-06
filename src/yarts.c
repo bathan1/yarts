@@ -122,19 +122,12 @@ typedef struct {
     sqlite3_vtab base;
 
     /**
-     * The columns for this row
+     * The #column_defs for this row
      */
-    struct column_def **columns;
+    struct column_def *column_defs;
 
-    /**
-     * Number of COLUMNS entries
-     * */
-    size_t columns_len;
-
-    /**
-     * Resolved schema string.
-     */
-    char *schema;
+    /** Number of COLUMNS_DEFS in the allocated buffer. */
+    size_t column_defs_count;
 } Fetch;
 
 /// Cursor
@@ -189,8 +182,8 @@ static yyjson_doc *array_wrap(yyjson_val *val) {
     return im_doc;
 }
 
-static Fetch *fetch_alloc(sqlite3 *db, int argc,
-                          const char *const *argv)
+static Fetch *init_fetch_vtab(sqlite3 *db, int argc,
+                          const char *const *argv, char **schema)
 {
     Fetch *vtab = sqlite3_malloc(sizeof(Fetch));
     if (!vtab) {
@@ -198,28 +191,38 @@ static Fetch *fetch_alloc(sqlite3 *db, int argc,
         return NULL;
     }
     memset(vtab, 0, sizeof(Fetch));
-    vtab->columns = column_defs_of_declrs(argc, argv, &vtab->columns_len);
+
+    // DELETEME
+    vtab->column_defs = parse_column_defs(argc, argv, &vtab->column_defs_count);
 
     /* max number of tokens valid inside a single xCreate argument for the table declaration */
-    int MAX_ARG_TOKENS = 2;
-    const char *table_name = argv[2];
-    struct string first_line = dynamic("CREATE TABLE %s(url hidden text,headers hidden text,body hidden text,", table_name);
+    struct string first_line = dynamic("create table %s(", argv[2]);
     sqlite3_str *s = sqlite3_str_new(db);
     sqlite3_str_appendall(s, first_line.hd);
-    for (int i = 3; i < vtab->columns_len; i++) {
-        struct column_def *def = vtab->columns[i];
-        const char *name = def->name.hd;
-        const char *typename = def->typename.hd;
-        sqlite3_str_appendf(s, "%s %s", def->name.hd, def->typename.hd);
 
-        if (i + 1 < vtab->columns_len)
+    for (int i = 0; i < vtab->column_defs_count; i++) {
+        sqlite3_str_appendf(
+            s,
+            "%s %s",
+            vtab->column_defs[i].name.hd,
+            vtab->column_defs[i].typename.hd
+        );
+
+        if (i < 3) {
+            // hidden column_defs come first in declaration
+            sqlite3_str_appendf(s, " %s", "hidden");
+        }
+
+        if (i + 1 < vtab->column_defs_count)
             sqlite3_str_appendall(s, ",");
     }
     sqlite3_str_appendall(s, ")");
-    vtab->schema = sqlite3_str_finish(s);
+    if (schema) {
+        *schema = sqlite3_str_finish(s);
+    }
     free(first_line.hd);
 
-    println("schema: %s", vtab->schema);
+    println("schema: %s", schema);
 
     return vtab;
 }
@@ -233,14 +236,15 @@ static int xConnect(sqlite3 *pdb, void *paux, int argc,
         return SQLITE_ERROR;
     }
     int rc = SQLITE_OK;
-    *pp_vtab = (sqlite3_vtab *) fetch_alloc(pdb, argc, argv);
+    char *schema = NULL;
+    *pp_vtab = (sqlite3_vtab *) init_fetch_vtab(pdb, argc, argv, &schema);
     Fetch *vtab = (Fetch *) *pp_vtab;
     if (!vtab) {
         return SQLITE_NOMEM;
     }
 
-    rc += sqlite3_declare_vtab(pdb, vtab->schema);
-    println("xConnect end for table:\n%s\n", vtab->schema);
+    rc += sqlite3_declare_vtab(pdb, schema);
+    println("xConnect end for table:\n%s\n", schema);
     return rc;
 }
 
@@ -263,7 +267,6 @@ static bool is_url_set_index_constraint(struct sqlite3_index_constraint *cst) {
         && cst->usable
     );
 }
-#define IS_CST_HEADERS_EQ(cst) (cst->iColumn == FETCH_HEADERS && cst->op == SQLITE_INDEX_CONSTRAINT_EQ && cst->usable)
 /* expected bitmask value of the index_info from xBestIndex */
 #define REQUIRED_BITS 0b01
 
@@ -281,7 +284,7 @@ static int check_plan_mask(struct sqlite3_index_info *index_info,
         struct sqlite3_index_constraint *cst = &index_info->aConstraint[i];
 
         if (cst->iColumn == FETCH_URL) {
-            // User passed in a "url" constraint, just not a usable one
+            // User passed in a "url" constraint but it still errored...
             is_url_eq_cst = 1;
             if (!cst->usable) {
                 return SQLITE_CONSTRAINT;
@@ -291,7 +294,7 @@ static int check_plan_mask(struct sqlite3_index_info *index_info,
 
     if (!is_url_eq_cst) {
         Fetch *vtab = (void *) pVtab;
-        if (!vtab->columns[FETCH_URL]->default_value.hd) {
+        if (!vtab->column_defs[FETCH_URL].default_value.hd) {
             pVtab->zErrMsg = sqlite3_mprintf(
                 "fetch SELECT needs a `WHERE url = 'something'` clause when no default url is set.\n");
             return SQLITE_ERROR;
@@ -336,25 +339,11 @@ static int xBestIndex(sqlite3_vtab *pVTab, sqlite3_index_info *pIdxInfo) {
 static int xDisconnect(sqlite3_vtab *pvtab) {
     println("xDisconnect begin");
     Fetch *vtab = (Fetch *) pvtab;
-    for (int i = 0; i < vtab->columns_len; i++) {
-        if (vtab->columns[i]) {
-            if (vtab->columns[i]->name.hd) {
-                free(vtab->columns[i]->name.hd);
-                vtab->columns[i]->name.hd = 0;
-            }
-            if (vtab->columns[i]->typename.hd) {
-                free(vtab->columns[i]->typename.hd);
-                vtab->columns[i]->typename.hd = 0;
-            }
-            free(vtab->columns[i]);
-            vtab->columns[i] = 0;
-        }
-    }
-    free(vtab->columns);
-    vtab->columns = 0;
-    vtab->columns_len = 0;
 
-    sqlite3_free(vtab->schema);
+    free(vtab->column_defs);
+    vtab->column_defs = 0;
+    vtab->column_defs_count = 0;
+
     sqlite3_free(pvtab);
     println("xDisconnect end");
     return SQLITE_OK;
@@ -364,6 +353,7 @@ static int xDisconnect(sqlite3_vtab *pvtab) {
  * Initialize fetch cursor at P_VTAB's cursor PP_CURSOR with count = 0.
  */
 static int xOpen(sqlite3_vtab *pvtab, sqlite3_vtab_cursor **pp_cursor) {
+    println("xOpen begin");
     Fetch *fetch = (Fetch *) pvtab;
     fetch_cursor_t *cur = sqlite3_malloc(sizeof(fetch_cursor_t));
     if (!cur) {
@@ -452,7 +442,7 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
                     sqlite3_context *pctx,
                     int icol)
 {
-    // println("xColumn(column = %d)", icol);
+    println("xColumn(column = %d)", icol);
 
     fetch_cursor_t *cursor = (fetch_cursor_t *)pcursor;
     Fetch *vtab = (void *) cursor->base.pVtab;
@@ -463,20 +453,20 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
     }
 
     if (icol < 3) {
-        // Skip hidden columns
+        // Skip hidden column_defs
         return SQLITE_OK;
     }
 
-    struct column_def *def = vtab->columns[icol];
+    struct column_def def = vtab->column_defs[icol];
     yyjson_val *val = yyjson_doc_get_root(cursor->next_doc);
 
-    if (def->generated_always_as_len > 0) {
+    if (def.generated_always_as_len > 0) {
         val = follow_generated_path(
             val,
-            def->generated_always_as,
-            def->generated_always_as_len);
+            def.generated_always_as,
+            def.generated_always_as_len);
     } else {
-        val = yyjson_obj_getn(val, def->name.hd, def->name.length);
+        val = yyjson_obj_getn(val, def.name.hd, def.name.length);
     }
 
     if (!val) {
@@ -494,7 +484,7 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
         break;
 
     case YYJSON_TYPE_BOOL:
-        json_bool_result(pctx, def, val);
+        json_bool_result(pctx, &def, val);
         break;
 
     case YYJSON_TYPE_OBJ:
@@ -544,7 +534,7 @@ static int xFilter(sqlite3_vtab_cursor *cur0,
     Cur->next_doc  = NULL;
 
     // Extract URL
-    if (argc == 0 && !vtab->columns[FETCH_URL]->default_value.hd) {
+    if (argc == 0 && !vtab->column_defs[FETCH_URL].default_value.hd) {
         cur0->pVtab->zErrMsg =
             sqlite3_mprintf("fetch: need at least 1 argument or default url");
         return SQLITE_ERROR;
@@ -552,7 +542,7 @@ static int xFilter(sqlite3_vtab_cursor *cur0,
 
     const char *url = (argc > 0)
         ? (const char*)sqlite3_value_text(argv[0])
-        : vtab->columns[FETCH_URL]->default_value.hd;
+        : vtab->column_defs[FETCH_URL].default_value.hd;
 
     Cur->stream = fetch(url, (const char *[]){0});
 

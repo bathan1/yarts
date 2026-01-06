@@ -54,9 +54,9 @@ struct string lowercase_im(const struct string s);
 int rmch(struct string *s, char ch);
 
 /**
- * @brief Copies char buffer S's *pointer* of known size LEN into a #string
+ * Get back a #string handle of a string S with a length LEN known at call-time.
  */
-struct string sstatic(const char *s, size_t len);
+struct string ss(const char *s, size_t len);
 
 /**
  * @brief Slice a *copy* of S from START to END (exclusive).

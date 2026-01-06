@@ -11,7 +11,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-struct string sstatic(const char *s, size_t len) {
+struct string ss(const char *s, size_t len) {
     struct string str = {0};
     if (!s)
         return str;

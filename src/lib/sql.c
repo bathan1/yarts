@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAX_COL_COUNT 64
 #define FETCH_ARGS_OFFSET 3
 
 enum {
@@ -79,15 +80,15 @@ static int hidden_column(int column_id, struct column_def **columns) {
             memcpy(hidden_column_name, "body", 4);
             break;
     }
-    columns[column_id]->name = sstatic(hidden_column_name, 3);
-    columns[column_id]->typename = sstatic(
+    columns[column_id]->name = ss(hidden_column_name, 3);
+    columns[column_id]->typename = ss(
         strndup("text", 4),
         3
     );
     return 0;
 }
 
-struct column_def **column_defs_of_declrs(int argc, const char *const *argv,
+struct column_def **column_defs_from_declrs(int argc, const char *const *argv,
                                           size_t *num_columns)
 {
     struct column_def *columns[64 + 3] = {0};
@@ -228,9 +229,124 @@ struct column_def **column_defs_of_declrs(int argc, const char *const *argv,
         // else the hidden column was explicitly user defined
     }
 
-    struct column_def **heap_columns = calloc(1, sizeof(struct column_def) * col_index);
-    memcpy(heap_columns, columns, sizeof(struct column_def) * col_index);
+    struct column_def **heap_columns =
+        calloc(col_index, sizeof(struct column_def *));
+    if (!heap_columns) return NULL;
+
+    memcpy(heap_columns, columns,
+        col_index * sizeof(struct column_def *));
+
     if (num_columns) *num_columns = col_index;
 
     return heap_columns;
+}
+
+/**
+ * Initialize column definitions and resolve the user's hidden column options, if any,
+ * from the table declaration in ARGC and ARGV.
+ */
+struct column_def *resolve_hidden_columns(int argc, const char *const *argv) {
+    struct column_def *cols = calloc(MAX_COL_COUNT, sizeof(struct column_def));
+    // static declarations
+    cols[0] = (struct column_def) {
+        .name = ss("url", 4),
+        .typename = ss("text", 4),
+        .default_value = ss("", 0),
+        .generated_always_as = NULL,
+        .generated_always_as_len = 0
+    };
+    cols[1] = (struct column_def) {
+        .name = ss("headers", 7),
+        .typename = ss("text", 4),
+        .default_value = ss("", 0),
+        .generated_always_as = NULL,
+        .generated_always_as_len = 0
+    };
+    cols[2] = (struct column_def) {
+        .name = ss("body", 7),
+        .typename = ss("text", 4),
+        .default_value = ss("", 0),
+        .generated_always_as = NULL,
+        .generated_always_as_len = 0
+    };
+
+    for (int i = FETCH_ARGS_OFFSET; i < argc; i++) {
+        size_t num_tokens = 0;
+        struct string *tokens = splitch(
+            (struct string) {
+                .hd=(char *) argv[i],
+                .length = strlen(argv[i])
+            },
+            ' ',
+            &num_tokens
+        );
+
+        if (tokens[0].length == 3 
+            && strncmp(tokens[0].hd, "url", 3) == 0
+            && num_tokens == 4
+            /* (url, 1), (text, 2), (default, 3), ('some-url', 4) is 4 tokens */
+        ) {
+            rmch(&tokens[3], '\'');
+            cols[0].default_value = ss(
+                tokens[3].hd,
+                tokens[3].length
+            );
+        }
+    }
+
+    return cols;
+}
+
+/**
+ * Returns whether or not COLNAME matches that of the hidden columns always included
+ * in a fetch table.
+ */
+bool is_hidden_column(struct string colname) {
+    if (colname.length + 1 != (sizeof("url"))
+        && colname.length + 1 != sizeof("headers")
+        && colname.length + 1 != sizeof("body")
+    ) {
+        // early exit if buffer size isn't one of the hidden column sizes
+        return false;
+    }
+
+    return (
+        (colname.length == 3 && strncmp(colname.hd, "url", 3) == 0)
+        || (colname.length == 7 && strncmp(colname.hd, "headers", 7) == 0)
+        || (colname.length == 4 && strncmp(colname.hd, "body", 4) == 0)
+    );
+}
+
+struct column_def *parse_column_defs(int argc, const char *const *argv,
+                                      size_t *num_columns)
+{
+    struct column_def *cols = resolve_hidden_columns(argc, argv);
+
+    size_t n_columns = 3;
+    for (int i = FETCH_ARGS_OFFSET; i < argc; i++) {
+        size_t num_tokens = 0;
+        struct string *tokens = splitch(
+            (struct string) {
+                .hd = (char *) argv[i],
+                .length = strlen(argv[i])
+            },
+            ' ',
+            &num_tokens
+        );
+
+        if (is_hidden_column(tokens[0])) {
+            // we already handle this in resolve_hidden_columns()
+            continue;
+        }
+
+        cols[n_columns].name = tokens[0];
+        cols[n_columns].typename = tokens[1];
+        n_columns += 1;
+    }
+
+    if (num_columns) {
+        *num_columns = n_columns;
+    }
+
+    return cols;
 }
