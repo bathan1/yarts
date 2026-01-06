@@ -13,7 +13,7 @@
 #define peek(cur, field) (cur->field[cur->current_depth - 1])
 #define push(cur, field, value) ((cur->field[cur->current_depth]) = value)
 
-struct stream_state {
+struct stream_cookie_writable {
     yajl_handle parser;
     unsigned int current_depth;
     unsigned int depth;
@@ -32,6 +32,14 @@ struct stream_state {
     unsigned int pp_flags;
 };
 
+struct stream_cookie_readable {
+    struct deque8 *queue;
+    char *current;
+    size_t len;
+    size_t offset;
+    bool emit_newline;
+};
+
 /** YAJL parser callbacks */
 static yajl_callbacks callbacks;
 /** Close write end @ COOKIE. */
@@ -42,8 +50,8 @@ static int stream_fclosew(void *cookie);
 static int stream_fcloser(void *cookie);
 
 /** Initialize bassoon state on the heap and get back that pointer. */
-static struct stream_state *use_state();
-static void free_state(struct stream_state *w_bassoon);
+static struct stream_cookie_writable *use_state();
+static void free_state(struct stream_cookie_writable *writable);
 
 FILE *rstream(struct deque8 *init) {
     cookie_io_functions_t io = {
@@ -53,20 +61,22 @@ FILE *rstream(struct deque8 *init) {
         .seek  = NULL,
     };
 
-    return fopencookie(init, "r", io);
+    struct stream_cookie_readable *readable = calloc(1, sizeof(struct stream_cookie_readable));
+    readable->queue = init;
+    return fopencookie(readable, "r", io);
 }
 
 FILE *wstream(struct deque8 *init) {
-    struct stream_state *w_bassoon = use_state();
-    if (!w_bassoon) {
+    struct stream_cookie_writable *writable = use_state();
+    if (!writable) {
         perror("use_state");
         return NULL;
     }
-    w_bassoon->queue = init;
-    w_bassoon->parser = yajl_alloc(&callbacks, NULL, (void *) w_bassoon);
-    if (!w_bassoon->parser) {
+    writable->queue = init;
+    writable->parser = yajl_alloc(&callbacks, NULL, (void *) writable);
+    if (!writable->parser) {
         perror("yajl_alloc");
-        free(w_bassoon);
+        free(writable);
         return NULL;
     }
 
@@ -77,18 +87,18 @@ FILE *wstream(struct deque8 *init) {
         .seek  = NULL,
     };
 
-    return fopencookie(w_bassoon, "w", io);
+    return fopencookie(writable, "w", io);
 }
 
 /* BEGIN STATIC */
 static ssize_t stream_fwrite(void *cookie, const char *buf, size_t size) {
-    struct stream_state *c = cookie;
+    struct stream_cookie_writable *c = cookie;
     yajl_parse(c->parser, (const unsigned char *)buf, size);
     return size;
 }
 
 static int stream_fclosew(void *cookie) {
-    struct stream_state *cc = (void *) cookie;
+    struct stream_cookie_writable *cc = (void *) cookie;
     if (!cc) {
         return 1;
     }
@@ -104,40 +114,71 @@ static int stream_fclosew(void *cookie) {
     return 0;
 }
 
-static ssize_t stream_fread(void *cookie, char *buf, size_t size) {
-    struct deque8 *c = cookie;
-    char *json = deque8_pop(c);
-    if (!json)
+static ssize_t stream_fread(void *cookie, char *buf, size_t size)
+{
+    struct stream_cookie_readable *c = cookie;
+
+    if (size == 0)
         return 0;
 
-    size_t json_len = strlen(json);
-    size_t out_len;
+    size_t out = 0;
 
-    /* We want to include '\n' if possible */
-    if (json_len + 1 <= size) {
-        /* Full JSON plus newline fits */
-        memcpy(buf, json, json_len);
-        buf[json_len] = '\n';
-        out_len = json_len + 1;
-    } else {
-        /* Otherwise, we just emit truncated JSON only */
-        memcpy(buf, json, size);
-        out_len = size;
+    while (out < size) {
+
+        /* Emit newline if pending */
+        if (c->emit_newline) {
+            buf[out++] = '\n';
+            c->emit_newline = false;
+            return out;   // return immediately (stream semantics)
+        }
+
+        /* Load next JSON object if needed */
+        if (!c->current) {
+            c->current = deque8_pop(c->queue);
+            if (!c->current)
+                return out;  // EOF if nothing written
+
+            c->len = strlen(c->current);
+            c->offset = 0;
+        }
+
+        /* Emit JSON bytes */
+        size_t remaining = c->len - c->offset;
+        size_t to_copy = remaining < (size - out)
+            ? remaining
+            : (size - out);
+
+        memcpy(buf + out, c->current + c->offset, to_copy);
+
+        c->offset += to_copy;
+        out += to_copy;
+
+        /* Finished this object */
+        if (c->offset == c->len) {
+            free(c->current);
+            c->current = NULL;
+            c->emit_newline = true;  // <-- CRITICAL
+        }
+
+        /* Return once we’ve produced something */
+        if (out > 0)
+            return out;
     }
 
-    free(json);
-    return out_len;
+    return out;
 }
 
 static int stream_fcloser(void *cookie) {
-    struct deque8 *queue = (void *) cookie;
+    struct stream_cookie_readable *state = cookie;
+    struct deque8 *queue = (void *) state->queue;
     if (!queue) { return 1; }
     deque8_free(queue);
+    free(state);
     return 0;
 }
 
 static int handle_null(void *ctx) {
-    struct stream_state *state = ctx;
+    struct stream_cookie_writable *state = ctx;
     if (state->current_depth == 0) {
         fprintf(stderr, "current_depth is 0\n");
         return 0;
@@ -151,7 +192,7 @@ static int handle_null(void *ctx) {
 }
 
 static int handle_bool(void *ctx, int b) {
-    struct stream_state *state = ctx;
+    struct stream_cookie_writable *state = ctx;
     if (state->current_depth == 0) {
         fprintf(stderr, "current_depth is 0\n");
         return 0;
@@ -178,7 +219,7 @@ static int handle_double(void *ctx, double d) {
 }
 
 static int handle_number(void *ctx, const char *num, size_t len) {
-    struct stream_state *cur = ctx;
+    struct stream_cookie_writable *cur = ctx;
     if (cur->current_depth == 0) {
         fprintf(stderr, "current_depth is 0\n");
         return 0;
@@ -221,7 +262,7 @@ static int handle_number(void *ctx, const char *num, size_t len) {
 static int handle_string(void *ctx,
                          const unsigned char *str, size_t len)
 {
-    struct stream_state *cur = ctx;
+    struct stream_cookie_writable *cur = ctx;
 
     if (cur->current_depth == 0 || !peek(cur, key) || !peek(cur, object)) {
         return 0;
@@ -239,7 +280,7 @@ static int handle_string(void *ctx,
 }
 
 static int handle_start_map(void *ctx) {
-    struct stream_state *cur = ctx;
+    struct stream_cookie_writable *cur = ctx;
     if (cur->current_depth == 0) {
         yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
         yyjson_mut_val *obj = yyjson_mut_obj(doc);
@@ -267,7 +308,7 @@ static int handle_map_key(void *ctx,
                           const unsigned char *str,
                           size_t len)
 {
-    struct stream_state *cur = ctx;
+    struct stream_cookie_writable *cur = ctx;
     if (cur->keys_size >= cur->keys_cap) {
         // double
         cur->keys_cap *= 2;
@@ -283,7 +324,7 @@ static int handle_map_key(void *ctx,
 }
 
 static int handle_end_map(void *ctx) {
-    struct stream_state *cur = ctx;
+    struct stream_cookie_writable *cur = ctx;
     if (cur->current_depth == 1) {
         // closing root object because root object set depth to 1,
         // so that any nested object child can recursively push its own
@@ -342,8 +383,8 @@ static yajl_callbacks callbacks = {
     .yajl_end_array   = handle_end_array
 };
 
-static struct stream_state *use_state(void) {
-    struct stream_state *st = calloc(1, sizeof(struct stream_state));
+static struct stream_cookie_writable *use_state(void) {
+    struct stream_cookie_writable *st = calloc(1, sizeof(struct stream_cookie_writable));
     if (!st) return perror_rc(NULL, "calloc()", 0);
 
     st->keys_cap = 1 << 8;     // 256
@@ -359,7 +400,7 @@ static struct stream_state *use_state(void) {
     return st;
 }
 
-static void free_state(struct stream_state *st) {
+static void free_state(struct stream_cookie_writable *st) {
     if (!st) return;
 
     // Don't free st->queue here — it's not owned by the state!
