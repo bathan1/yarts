@@ -47,7 +47,7 @@ int lowercase(struct string *s);
 /**
  * @brief Immutable version of #lowercase(), so S isn't touched.
  */
-struct string lowercase_im(const struct string s);
+struct string to_lowercase(const struct string s);
 
 /**
  * @brief Remove all occurrences of CH from S.

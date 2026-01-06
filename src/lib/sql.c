@@ -242,6 +242,38 @@ struct column_def **column_defs_from_declrs(int argc, const char *const *argv,
 }
 
 /**
+ * Do the given NUM_TOKENS TOKENS have a `GENERATED ALWAYS AS` clause in it?.
+ */
+static bool is_with_generated_always_as(struct string *tokens, size_t num_tokens) {
+    if (num_tokens < 6) {
+        return false;
+    }
+    if (tokens[TOK_CST].length + 1 != sizeof("generated")
+        && tokens[TOK_CST_VAL].length + 1 != sizeof("always")
+        && tokens[TOK_CST_VAL2].length + 1 != sizeof("as"))
+    {
+        return false;
+    }
+    struct string generated_token = to_lowercase(tokens[TOK_CST]);
+    struct string always_token = to_lowercase(tokens[TOK_CST_VAL]);
+    struct string as_token = to_lowercase(tokens[TOK_CST_VAL2]);
+    bool has_generated_always_as = (
+        strncmp(generated_token.hd, "generated", 9) == 0
+        &&
+        strncmp(always_token.hd, "always", 6) == 0
+        &&
+        strncmp(as_token.hd, "as", 2) == 0
+        &&
+        tokens[TOK_CST_GEN_VAL].length > 0
+    );
+
+    free(generated_token.hd);
+    free(always_token.hd);
+    free(as_token.hd);
+    return has_generated_always_as;
+}
+
+/**
  * Initialize column definitions and resolve the user's hidden column options, if any,
  * from the table declaration in ARGC and ARGV.
  */
@@ -293,6 +325,7 @@ struct column_def *resolve_hidden_columns(int argc, const char *const *argv) {
                 tokens[3].length
             );
         }
+
     }
 
     return cols;
@@ -302,7 +335,7 @@ struct column_def *resolve_hidden_columns(int argc, const char *const *argv) {
  * Returns whether or not COLNAME matches that of the hidden columns always included
  * in a fetch table.
  */
-bool is_hidden_column(struct string colname) {
+static bool is_hidden_column(struct string colname) {
     if (colname.length + 1 != (sizeof("url"))
         && colname.length + 1 != sizeof("headers")
         && colname.length + 1 != sizeof("body")
@@ -316,6 +349,25 @@ bool is_hidden_column(struct string colname) {
         || (colname.length == 7 && strncmp(colname.hd, "headers", 7) == 0)
         || (colname.length == 4 && strncmp(colname.hd, "body", 4) == 0)
     );
+}
+
+/**
+ * Remove the leading and trailing dquote at TOKENS[TOK_NAME], printing out
+ * an error message with the original argument LINE_RAW in context if there is no
+ * corresponding trailing dquote.
+ */
+static int strip_colname_dquotes(struct string *tokens, const char *line_raw) {
+    if (tokens[TOK_NAME].hd[tokens[TOK_NAME].length - 1] != '\"') {
+        fprintf(stderr, "Open dquote line is missing closing dquote: %s\n", line_raw);
+        free(tokens);
+        return 1;
+    }
+    if (rmch(&tokens[TOK_NAME], '\"') != 0) {
+        fprintf(stderr, "Can't strip dquotes from a null string");
+        free(tokens);
+        return 1;
+    }
+    return 0;
 }
 
 struct column_def *parse_column_defs(int argc, const char *const *argv,
@@ -336,24 +388,46 @@ struct column_def *parse_column_defs(int argc, const char *const *argv,
         );
 
         if (is_hidden_column(tokens[TOK_NAME])) {
-            // we already handle this in resolve_hidden_columns()
-            continue;
+            continue; // we already handle this in resolve_hidden_columns()
         }
 
         if (tokens[TOK_NAME].hd[0] == '\"') {
-            if (tokens[TOK_NAME].hd[tokens[TOK_NAME].length - 1] != '\"') {
-                fprintf(stderr, "Open dquote line is missing closing dquote: %s\n", argv[i]);
+            if (strip_colname_dquotes(tokens, argv[i]) != 0) {
+                return NULL;
+            }
+        } else {
+            lowercase(&tokens[TOK_NAME]); // treat it as case-insensitive if no dquotes
+        }
+
+        // 5 tokens: id int generated always as (...)
+        if (is_with_generated_always_as(tokens, num_tokens)) {
+            char *expr_raw = tokens[TOK_CST_GEN_VAL].hd;
+            size_t expr_len = tokens[TOK_CST_GEN_VAL].length;
+            if (expr_len >= 2 && expr_raw[0] == '(' && expr_raw[expr_len - 1] == ')') {
+                expr_raw++;           // move start
+                expr_len -= 2;        // remove both '(' and ')'
+                expr_raw[expr_len] = 0;
+            }
+            struct string adjusted = {.hd=expr_raw, .length=expr_len};
+            struct string arrow_pattern = {.hd = "->", .length = 2};
+
+            size_t path_count = 0;
+            struct string *paths = split(adjusted, arrow_pattern, &path_count);
+            if (!paths) {
                 free(tokens);
                 return NULL;
             }
-            if (rmch(&tokens[TOK_NAME], '\"') != 0) {
-                free(tokens);
-                return perror_rc(NULL, "rmch", 0);
+
+            for (int i = 0; i < path_count; i++) {
+                if (paths[i].length > 0 && paths[i].hd[0] == '\'') {
+                    rmch(&paths[i], '\'');
+                }
             }
-        } else {
-            // With no dquotes around the column name, lowercase it like SQLite does
-            lowercase(&tokens[TOK_NAME]);
+
+            cols[n_columns].generated_always_as = paths;
+            cols[n_columns].generated_always_as_len = path_count;
         }
+
 
         cols[n_columns].name = tokens[TOK_NAME];
         cols[n_columns].typename = tokens[TOK_TYPE];

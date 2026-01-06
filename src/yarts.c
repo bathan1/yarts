@@ -240,22 +240,22 @@ static int xConnect(sqlite3 *pdb, void *paux, int argc,
     }
 
     rc += sqlite3_declare_vtab(pdb, schema);
+
+    println("(xConnect) schema is\n%s", schema);
+    println("(xConnect) OK");
+
     sqlite3_free(schema);
-
-    {
-        println("(xConnect) schema is\n%s", schema);
-        println("(xConnect) OK");
-    }
-
     return rc;
 }
 
+/**
+ * Same implementation as xConnect, we just have to point to different fns so this isn't 
+ * eponymous (can't be called as its own table e.g. SELECT * FROM fetch).
+ */
 static int xCreate(sqlite3 *pdb, void *paux, int argc,
                      const char *const *argv, sqlite3_vtab **pp_vtab,
-                     char **pz_err) {
-    // same implementation as xConnect, we just
-    // have to point to different fns so this isn't eponymous (can't be called
-    // as its own table e.g. SELECT * FROM fetch)
+                     char **pz_err)
+{
     return xConnect(pdb, paux, argc, argv, pp_vtab, pz_err);
 }
 
@@ -444,8 +444,6 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
                     sqlite3_context *pctx,
                     int icol)
 {
-    println("xColumn(column = %d)", icol);
-
     fetch_cursor_t *cursor = (fetch_cursor_t *)pcursor;
     Fetch *vtab = (void *) cursor->base.pVtab;
 
@@ -466,11 +464,14 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
         val = follow_generated_path(
             val,
             def.generated_always_as,
-            def.generated_always_as_len);
+            def.generated_always_as_len
+        );
+
     } else {
         val = yyjson_obj_getn(val, def.name.hd, def.name.length);
     }
 
+    char *json = yyjson_val_write(val, YYJSON_WRITE_PRETTY, NULL);
     if (!val) {
         sqlite3_result_null(pctx);
         return SQLITE_OK;

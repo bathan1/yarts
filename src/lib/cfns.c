@@ -52,7 +52,9 @@ struct string dynamic(const char *fmt, ...) {
 
 struct string slice(const struct string s, size_t start, size_t end) {
     struct string out = { .hd = NULL, .length = 0 };
-    if (!s.hd || start > s.length || end > start) return out;
+    if (!s.hd || start > end || end > s.length) {
+        return out;
+    }
     struct string slice = {
         .hd=NULL, .length=0
     };
@@ -242,7 +244,7 @@ int rmch(struct string *s, char ch) {
     return 0;
 }
 
-struct string lowercase_im(const struct string s) {
+struct string to_lowercase(const struct string s) {
     struct string out = {0};
     if (!s.hd) return out;
 
