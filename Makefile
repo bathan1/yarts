@@ -3,20 +3,20 @@ MAKEFLAGS += -rR
 .SUFFIXES:
 
 # ---- Names ----
-API_EXT     := yapi
-SQLITE_EXT  := yarts
+API_EXT     := vapi
+SQLITE_EXT  := vhs
 
 API_TARGET     := lib$(API_EXT).so
 SQLITE_TARGET  := lib$(SQLITE_EXT).so
 
 # ---- Source Files ----
 SRC_COMMON := \
-    src/yapi.c \
+    src/vapi.c \
     src/lib/stream.c src/lib/fetch.c \
     src/lib/cfns.c src/lib/tcp.c src/lib/sql.c
 
 SRC_SQLITE := \
-    src/yarts.c
+    src/vhs.c
 
 OBJ_COMMON  := $(SRC_COMMON:.c=.o)
 OBJ_SQLITE  := $(SRC_SQLITE:.c=.o)
@@ -54,8 +54,8 @@ install: $(API_TARGET)
 	mkdir -p $(LIBDIR)
 	install -m 755 $(API_TARGET) $(LIBDIR)
 
-	@echo "Installing public header yarts.h to $(INCLUDEDIR)"
-	install -m 644 src/yapi.h $(INCLUDEDIR)/yapi.h
+	@echo "Installing public header vapi.h to $(INCLUDEDIR)"
+	install -m 644 src/vapi.h $(INCLUDEDIR)/vapi.h
 
 	@echo "Updating ldconfig cache (Linux only)"
 	@if [ "$(shell uname -s)" = "Linux" ]; then ldconfig; fi
@@ -67,8 +67,8 @@ uninstall:
 	@echo "Removing $(API_TARGET) from $(LIBDIR)"
 	rm -f $(LIBDIR)/$(API_TARGET)
 
-	@echo "Removing yarts.h from $(INCLUDEDIR)"
-	rm -f $(INCLUDEDIR)/yarts.h
+	@echo "Removing vapi.h from $(INCLUDEDIR)"
+	rm -f $(INCLUDEDIR)/vapi.h
 
 	@echo "Updating ldconfig cache (Linux only)"
 	@if [ "$(shell uname -s)" = "Linux" ]; then ldconfig; fi

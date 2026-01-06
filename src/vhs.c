@@ -2,7 +2,7 @@
 #include <sqlite3ext.h>
 SQLITE_EXTENSION_INIT1
 
-#include "yapi.h"
+#include "vapi.h"
 #include "lib/sql.h"
 
 // uncomment to remove all debug prints
@@ -25,15 +25,6 @@ SQLITE_EXTENSION_INIT1
 #define FETCH_HEADERS 2
 
 /* For debug logs */
-#ifdef NDEBUG
-  #define println(...) do { } while (0)
-#else
-  #define println(...)                     \
-    do {                                     \
-      printf("fetch-dbg> " __VA_ARGS__);           \
-        printf("\n");\
-    } while (0)
-#endif
 
 static void debug_print_json(const char *label, yyjson_val *val) {
 #ifndef NDEBUG
@@ -159,29 +150,6 @@ static bool is_key_body(char *key) {
 // "{?headers}", ... optional static column declarations
 #define MAX_FETCH_ARGC 6
 
-static int index_of_key(char *key) {
-    if (is_key_url(key)) {
-        return 0;
-    } else if (is_key_body(key)) {
-        return 1;
-    } else {
-        // headers
-        return 2;
-    }
-}
-
-static yyjson_doc *array_wrap(yyjson_val *val) {
-    yyjson_mut_doc *mdoc = yyjson_mut_doc_new(NULL);
-    yyjson_mut_val *arr = yyjson_mut_arr(mdoc);
-    yyjson_mut_doc_set_root(mdoc, arr);
-
-    yyjson_mut_val *copied = yyjson_val_mut_copy(mdoc, val);
-    yyjson_mut_arr_add_val(arr, copied);
-    yyjson_doc *im_doc = yyjson_mut_doc_imut_copy(mdoc, NULL);
-    yyjson_mut_doc_free(mdoc);
-    return im_doc;
-}
-
 static Fetch *init_fetch_vtab(sqlite3 *db, int argc,
                           const char *const *argv, char **schema)
 {
@@ -240,9 +208,6 @@ static int xConnect(sqlite3 *pdb, void *paux, int argc,
     }
 
     rc += sqlite3_declare_vtab(pdb, schema);
-
-    println("(xConnect) schema is\n%s", schema);
-    println("(xConnect) OK");
 
     sqlite3_free(schema);
     return rc;
@@ -339,7 +304,6 @@ static int xBestIndex(sqlite3_vtab *pVTab, sqlite3_index_info *pIdxInfo) {
  * Serves as both xDestroy and xDisconnect for the vtable.
  */
 static int xDisconnect(sqlite3_vtab *pvtab) {
-    println("xDisconnect begin");
     Fetch *vtab = (Fetch *) pvtab;
 
     free(vtab->column_defs);
@@ -347,7 +311,6 @@ static int xDisconnect(sqlite3_vtab *pvtab) {
     vtab->column_defs_count = 0;
 
     sqlite3_free(pvtab);
-    println("xDisconnect end");
     return SQLITE_OK;
 }
 
@@ -355,7 +318,6 @@ static int xDisconnect(sqlite3_vtab *pvtab) {
  * Initialize fetch cursor at P_VTAB's cursor PP_CURSOR with count = 0.
  */
 static int xOpen(sqlite3_vtab *pvtab, sqlite3_vtab_cursor **pp_cursor) {
-    println("xOpen begin");
     Fetch *fetch = (Fetch *) pvtab;
     fetch_cursor_t *cur = sqlite3_malloc(sizeof(fetch_cursor_t));
     if (!cur) {
@@ -371,7 +333,6 @@ static int xOpen(sqlite3_vtab *pvtab, sqlite3_vtab_cursor **pp_cursor) {
 }
 
 static int xClose(sqlite3_vtab_cursor *cur) {
-    println("xClose begin");
     fetch_cursor_t *cursor = (fetch_cursor_t *)cur;
     if (cursor) {
         if (cursor->next_doc) {
@@ -382,7 +343,6 @@ static int xClose(sqlite3_vtab_cursor *cur) {
         }
         sqlite3_free(cur);
     }
-    println("xClose end");
     return SQLITE_OK;
 }
 
@@ -390,7 +350,6 @@ static int xNext(sqlite3_vtab_cursor *cur0) {
     fetch_cursor_t *cur = (fetch_cursor_t*)cur0;
     Fetch *vtab = (void*) cur->base.pVtab;
 
-    println("xNext (%u -> %u) begin", cur->count, cur->count + 1);
 
     // Sanity: next_doc must always contain the row returned previously.
     if (!cur->next_doc) {
@@ -506,7 +465,6 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
         sqlite3_result_null(pctx);
     }
 
-    // println("xColumn end");
     return SQLITE_OK;
 }
 
@@ -514,7 +472,6 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
 static int xEof(sqlite3_vtab_cursor *cur) {
     fetch_cursor_t *c = (fetch_cursor_t*)cur;
     int rc = c->next_doc == NULL;
-    println("xEof end %s", rc == 1 ? "true" : "false");
     return rc;
 }
 
@@ -528,7 +485,6 @@ static int xFilter(sqlite3_vtab_cursor *cur0,
                     int idxNum, const char *idxStr,
                     int argc, sqlite3_value **argv)
 {
-    println("xFilter begin");
     Fetch *vtab = (Fetch*)cur0->pVtab;
     fetch_cursor_t *Cur = (fetch_cursor_t*)cur0;
 
@@ -557,7 +513,6 @@ static int xFilter(sqlite3_vtab_cursor *cur0,
         return SQLITE_ERROR;
     }
 
-    println("xFilter end");
     return SQLITE_OK;
 }
 
@@ -584,10 +539,10 @@ static sqlite3_module fetch_vtab_module = {
 };
 
 // Runtime loadable entry
-int sqlite3_yarts_init(sqlite3 *db, char **pzErrMsg,
+int sqlite3_vhs_init(sqlite3 *db, char **pzErrMsg,
                        const sqlite3_api_routines *pApi) {
     SQLITE_EXTENSION_INIT2(pApi);
     // oh yeah baby
-    int rc = sqlite3_create_module(db, "fetch", &fetch_vtab_module, 0);
+    int rc = sqlite3_create_module(db, "vhs", &fetch_vtab_module, 0);
     return rc;
 }

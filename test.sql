@@ -1,15 +1,15 @@
-.load ./libyarts
+.load ./libvhs
 .mode box
-create virtual table todos using fetch (
+create virtual table todos using vhs (
     url text default 'https://jsonplaceholder.typicode.com/todos',
     id int,
     "userId" int,
     title text,
-    completed text
+    completed int
 );
 select * from todos limit 5;
 
-CREATE VIRTUAL TABLE users USING fetch (
+CREATE VIRTUAL TABLE users USING vhs (
     url TEXT DEFAULT 'https://jsonplaceholder.typicode.com/users',
     id INT,
     name TEXT,

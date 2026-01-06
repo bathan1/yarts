@@ -1,5 +1,5 @@
 /**
- * @file yapi.h
+ * @file vapi.h
  * @brief Yet Another Runtime TCP Stream internal functions API
  *
  * Helper functions #yarts.c has available.
@@ -12,17 +12,6 @@
  */
 #pragma once
 #include <stdio.h>
-
- /* FETCH FRAME OPTIONS. These are just plain integers
-  * that are statically cast to `const char *` for convenience.
-  * You can pass in plain integers to the frame slot and that will
-  * work just fine, you will just get some compiler warnings. */
-
-/**
- * @brief Parse JSON objects into NDJSON.
- * This is also the default parse strategy.
- */
-static const char *FRAME_NDJSON = 0;
 
 /**
  * @brief Make FILES[1] write to readable FILES[0].

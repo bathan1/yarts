@@ -1,5 +1,5 @@
-# yarts
-Yet Another Runtime TCP Stream (for SQLite).
+# VHS
+An HTTP backed virtual table for SQLite.
 
 | OS      | Arch  | Tested |
 |---------|-------|--------|
@@ -41,7 +41,7 @@ make
 And that's it!
 
 ## Other Scripts
-To install / uninstall the Yarts API header `yapi.h` from your usr local lib:
+To install / uninstall the VHS API header `vapi.h` from your usr local lib:
 
 ```bash
 sudo make install
@@ -57,13 +57,13 @@ pnpm run test
 
 ## Library
 The majority of the code is under `src/lib`, where a select number of functions
-are exposed to the extension `yarts.c` file via the `yapi.h` header.
+are exposed to the extension `vhs.c` file via the `vapi.h` header.
 
 If you've installed the API via the `make install` command, you can use the helper functions
-in standalone code by compiling with the `-lyapi` flag. To compile the queue printer example script:
+in standalone code by compiling with the `-lvapi` flag. To compile the queue printer example script:
 
 ```
-gcc stream_print.c -lyapi
+gcc stream_print.c -lvapi
 ```
 
 ## Documentation

@@ -1,8 +1,8 @@
 {
-    "name": "yarts",
+    "name": "vhs",
     "version": "0.9.8",
     "type": "module",
-    "description": "yet another runtime tcp stream for sqlite",
+    "description": "An HTTP Virtual Table extension for SQLite",
     "scripts": {
         "test": "vitest tests"
     },

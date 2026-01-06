@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # Read JSON
 
-The Fetch virtual table was designed to work with JSONs by default.
+The VHS virtual table was designed to work with JSONs by default.
 
 *From* JSON *to* SQLite, the type conversions are:
 
@@ -37,7 +37,7 @@ Here's what a todo from the [typicode api](https://jsonplaceholder.typicode.com/
 }
 ```
 
-To *read* a todo JSON as a SQL row, we have to tell the `fetch` virtual table
+To *read* a todo JSON as a SQL row, we have to tell the `vhs` virtual table
 factory what SQL types we need converted from the JSON types.
 
 ## Easy Column Maps
@@ -57,7 +57,7 @@ id INT,
 title TEXT
 ```
 
-The Fetch virtual table works best with numerical / text types
+The VHS virtual table works best with numerical / text types
 because they have a logical 1-to-1 mapping between JSON and SQL.
 
 ## Booleans
@@ -70,20 +70,21 @@ If you choose to save `completed` columns as `TEXT`:
 
 ```sql title="todos_text.sql"
 DROP TABLE IF EXISTS todos;
-CREATE VIRTUAL TABLE todos USING fetch (
+
+CREATE VIRTUAL TABLE todos USING vhs (
     url TEXT DEFAULT 'https://jsonplaceholder.typicode.com/todos',
     id INT,
     "userId" INT,
     title TEXT,
     completed TEXT
 );
+
 SELECT * FROM todos LIMIT 5;
 ```
 
 Then yarts will map booleans to their text representation `true` and `false`:
 
 ```bash
-sqlite> SELECT * FROM todos LIMIT 5;
 ┌────┬────────┬──────────────────────────────────────────────────────────────┬───────────┐
 │ id │ userId │                            title                             │ completed │
 ├────┼────────┼──────────────────────────────────────────────────────────────┼───────────┤
@@ -104,20 +105,21 @@ Boolean maps to `INT`s follow the standard C style bools where...
 
 ```sql title="todos_int.sql"
 DROP TABLE IF EXISTS todos;
-CREATE VIRTUAL TABLE todos USING fetch (
+
+CREATE VIRTUAL TABLE todos USING vhs (
     url TEXT DEFAULT 'https://jsonplaceholder.typicode.com/todos',
     id INT,
     "userId" INT,
     title TEXT,
     completed INT
 );
+
 SELECT * FROM todos LIMIT 5;
 ```
 
 ... `true` turns into `1` and `false` turns into `0`:
 
 ```bash
-sqlite> SELECT * FROM todos LIMIT 5;
 ┌────┬────────┬──────────────────────────────────────────────────────────────┬───────────┐
 │ id │ userId │                            title                             │ completed │
 ├────┼────────┼──────────────────────────────────────────────────────────────┼───────────┤
@@ -135,59 +137,27 @@ sqlite> SELECT * FROM todos LIMIT 5;
 ```
 
 ## Objects and Arrays
-The last JSON types yarts has to handle are `object` and `array` types,
+The last JSON types VHS has to handle are `object` and `array` types,
 which it does by simply stringifying the values into `TEXT` columns.
 
-A `user` JSON from the typicode API looks like this:
-
-```json
-{
-  "id": 1,
-  "name": "Leanne Graham",
-  "username": "Bret",
-  "email": "Sincere@april.biz",
-  // highlight-start
-  "address": {
-    "street": "Kulas Light",
-    "suite": "Apt. 556",
-    "city": "Gwenborough",
-    "zipcode": "92998-3874",
-    "geo": {
-      "lat": "-37.3159",
-      "lng": "81.1496"
-    }
-  },
-  // highlight-end
-  "phone": "1-770-736-8031 x56442",
-  "website": "hildegard.org",
-  // highlight-start
-  "company": {
-    "name": "Romaguera-Crona",
-    "catchPhrase": "Multi-layered client-server neural-net",
-    "bs": "harness real-time e-markets"
-  }
-  // highlight-end
-}
-```
-
-We can declare the `users` table like this, where we set the
-`address` and `company` object values as `TEXT`s:
+For example, the `address` and `company` fields from the typicode API is a JSON object,
+so we declare their types as `TEXT`:
 
 ```sql
-CREATE VIRTUAL TABLE users USING fetch (
+CREATE VIRTUAL TABLE users USING vhs (
     url TEXT DEFAULT 'https://jsonplaceholder.typicode.com/users',
     id INT,
     name TEXT,
     address TEXT,
     company TEXT
 );
+
 SELECT * FROM users LIMIT 2;
 ```
 
-SQLite will just save it as plaintext:
+SQLite will just represent it as plaintext:
 
 ```bash
-sqlite> SELECT * FROM users LIMIT 2;
 ┌────┬───────────────┬──────────────────────────────┬────────────────────────────────────────────────────────────┐
 │ id │     name      │           address            │                          company                           │
 ├────┼───────────────┼──────────────────────────────┼────────────────────────────────────────────────────────────┤
@@ -215,12 +185,13 @@ sqlite> SELECT * FROM users LIMIT 2;
 └────┴───────────────┴──────────────────────────────┴────────────────────────────────────────────────────────────┘
 ```
 
-If you want to extract nested object values, use a `GENERATED ALWAYS AS` column
-in conjunction with the `json_extract` SQLite function like so:
+If you want to extract nested object values, use a `GENERATED ALWAYS AS` clause
+in conjunction with the `->` JSON path traversal (Postgres style):
 
 ```sql
 DROP TABLE IF EXISTS users;
-CREATE VIRTUAL TABLE users USING fetch (
+
+CREATE VIRTUAL TABLE users USING vhs (
     url TEXT DEFAULT 'https://jsonplaceholder.typicode.com/users',
     id INT,
     name TEXT,
@@ -231,11 +202,11 @@ CREATE VIRTUAL TABLE users USING fetch (
     address_geo_lng TEXT GENERATED ALWAYS AS (address->'geo'->'lng')
     -- highlight-end
 );
+
 SELECT * FROM users LIMIT 2;
 ```
 
 ```bash
-sqlite> SELECT * FROM users LIMIT 2;
 ┌────┬───────────────┬────────────────┬─────────────────┬─────────────────┬─────────────────┐
 │ id │     name      │ address_street │ address_zipcode │ address_geo_lat │ address_geo_lng │
 ├────┼───────────────┼────────────────┼─────────────────┼─────────────────┼─────────────────┤
@@ -247,27 +218,26 @@ sqlite> SELECT * FROM users LIMIT 2;
 If you have deeply nested values that are only separated by `object` parents,
 then the `GENERATED ALWAYS AS` extraction is the best way to read that directly.
 
-## Extract Nested Values
-The Fetch virtual table assumes the endpoint at `url` returns a JSON array of objects.
-If it returns a single object, then that object will be treated as the only row of the
-table.
+## Response Body
+The Fetch virtual table assumes the response body from the server is encoded as a JSON array of objects.
+If it returns a single object, then that object will be treated as the only row of the table.
 
-The FHIR API specs always return a single [Bundle](https://hl7.org/fhir/R4/bundle.html) object for 
-its resources. So attempting to make this `patients` table.
+For example, the FHIR API specs always return a single [Bundle](https://hl7.org/fhir/R4/bundle.html) object for 
+its resources. So attempting to create this `patients` table...
 
 ```sql
-CREATE VIRTUAL TABLE patients USING fetch (
+CREATE VIRTUAL TABLE patients USING vhs (
     url TEXT DEFAULT 'https://r4.smarthealthit.org/Patient',
-    id TEXT,
-    "resourceType" TEXT
+    "resourceType" TEXT,
+    id TEXT
 );
+
 SELECT * FROM patients;
 ```
 
-Will result in this result set:
+...will result in this result set:
 
 ```bash
-sqlite> SELECT * FROM patients;
 ┌──────────────┬──────────────────────────────────────┐
 │ resourceType │                  id                  │
 ├──────────────┼──────────────────────────────────────┤
@@ -275,8 +245,7 @@ sqlite> SELECT * FROM patients;
 └──────────────┴──────────────────────────────────────┘
 ```
 
-Of course, we'd like to be able to view the `Bundle.entry.resource` array field
-as the rows.
+We'd like to be able to view the `Bundle.entry.resource` array field as the rows.
 
 We can do so by setting the `body` hidden column against `patients` to specify
 the JSON path we want to follow from the body using [JSONPath](https://en.wikipedia.org/wiki/JSONPath):
@@ -287,7 +256,6 @@ WHERE body = '$.entry[*].resource';
 ```
 
 ```bash
-sqlite> SELECT * FROM patients WHERE body = '$.entry[*].resource';
 TODO: PASTEME
 ```
 

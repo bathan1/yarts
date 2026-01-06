@@ -3,12 +3,10 @@ sidebar_position: 1
 ---
 
 # Introduction
-*Yet Another Runtime TCP Stream for SQLite*, or *yarts* for short, is an SQLite runtime extension.
+*Virtual HTTP SQL*, or *vhs* for short, is an SQLite runtime extension that
+provides an HTTP-backed virtual table.
 
-It provides TCP networking capabilities to SQLite and wraps a simple HTTP client over 
-the transport.
-
-Let's discover **yarts in less than 5 minutes**.
+Let's discover **vhs in less than 5 minutes**.
 
 ## Getting Started
 
@@ -24,14 +22,14 @@ Install the extension from the Github releases page and open SQLite.
 The default release is Linux x86_64:
 
 ```bash
-curl -LO https://github.com/bathan1/yarts/releases/latest/download/libyarts.so
+curl -LO https://github.com/bathan1/vhs/releases/latest/download/libvhs.so
 sqlite3
 ```
 
 Load the extension:
 
 ```sql
-.load ./libyarts
+.load ./libvhs
 ```
 
 Optionally format the cli:
@@ -40,13 +38,13 @@ Optionally format the cli:
 .mode box
 ```
 
-You have now linked the `fetch` virtual table library with SQLite.
+You have now linked the `vhs` virtual table library with SQLite.
 
 ## Write your Queries
-Create a Virtual Table by declaring your expected payload shape with the `fetch` virtual table:
+Create a Virtual Table by declaring your expected payload shape with the `vhs` virtual table:
 
 ```sql
-CREATE VIRTUAL TABLE todos USING fetch (
+CREATE VIRTUAL TABLE todos USING vhs (
     id INT,
     "userId" INT,
     title TEXT,
@@ -54,54 +52,103 @@ CREATE VIRTUAL TABLE todos USING fetch (
 );
 ```
 
-Fetch will include a `url HIDDEN TEXT` column into 
-your virtual table, which will provide the url to fetch from.
+The `vhs` module will include a `url HIDDEN TEXT` column into your virtual table, which specifies the url 
+to send the http request to.
 
-To fetch some `todos` from a json dummy api, for example,
-we set `url` equal to the endpoint in `SELECT ... WHERE ...` query:
+To fetch `todos` from a json dummy api, for example, we set `url` equal to the 
+endpoint in `SELECT ... WHERE ...` query:
 
 ```sql
-SELECT * FROM todos
-WHERE url = 'https://jsonplaceholder.typicode.com/todos' LIMIT 5;
+SELECT * FROM todos WHERE url = 'https://jsonplaceholder.typicode.com/todos' LIMIT 5;
+```
+
+```bash
+┌────┬────────┬──────────────────────────────────────────────────────────────┬───────────┐
+│ id │ userId │                            title                             │ completed │
+├────┼────────┼──────────────────────────────────────────────────────────────┼───────────┤
+│ 1  │ 1      │ delectus aut autem                                           │ false     │
+├────┼────────┼──────────────────────────────────────────────────────────────┼───────────┤
+│ 2  │ 1      │ quis ut nam facilis et officia qui                           │ false     │
+├────┼────────┼──────────────────────────────────────────────────────────────┼───────────┤
+│ 3  │ 1      │ fugiat veniam minus                                          │ false     │
+├────┼────────┼──────────────────────────────────────────────────────────────┼───────────┤
+│ 4  │ 1      │ et porro tempora                                             │ true      │
+├────┼────────┼──────────────────────────────────────────────────────────────┼───────────┤
+│ 5  │ 1      │ laboriosam mollitia et enim quasi adipisci quia provident il │ false     │
+│    │        │ lum                                                          │           │
+└────┴───────────────────────────────────────────────────────────────────────┴───────────┘
 ```
 
 To query all completed todos:
 
 ```sql
-SELECT * FROM todos WHERE 
-url = 'https://jsonplaceholder.typicode.com/todos'
+SELECT * FROM todos WHERE url = 'https://jsonplaceholder.typicode.com/todos'
 AND completed = 'true' LIMIT 5;
 ```
 
-If you only cared about the `id` and `title` fields, you
-can simply omit the other fields:
+```bash
+┌────┬────────┬──────────────────────────────────────────────┬───────────┐
+│ id │ userId │                    title                     │ completed │
+├────┼────────┼──────────────────────────────────────────────┼───────────┤
+│ 4  │ 1      │ et porro tempora                             │ true      │
+│ 8  │ 1      │ quo adipisci enim quam ut ab                 │ true      │
+│ 10 │ 1      │ illo est ratione doloremque quia maiores aut │ true      │
+│ 11 │ 1      │ vero rerum temporibus dolor                  │ true      │
+│ 12 │ 1      │ ipsa repellendus fugit nisi                  │ true      │
+└────┴────────┴──────────────────────────────────────────────┴───────────┘
+```
+
+If you only cared about the `id` and `title` fields, just include those columns in the schema:
 
 ```sql
 DROP TABLE IF EXISTS todos;
-CREATE VIRTUAL TABLE todos USING fetch (
+
+CREATE VIRTUAL TABLE todos USING vhs (
     id INT,
     title TEXT
 );
-SELECT * FROM todos
-WHERE url = 'https://jsonplaceholder.typicode.com/todos'
-LIMIT 5;
+
+SELECT * FROM todos WHERE url = 'https://jsonplaceholder.typicode.com/todos' LIMIT 5;
 ```
+
+```bash
+┌────┬──────────────────────────────────────────────────────────────┐
+│ id │                            title                             │
+├────┼──────────────────────────────────────────────────────────────┤
+│ 1  │ delectus aut autem                                           │
+├────┼──────────────────────────────────────────────────────────────┤
+│ 2  │ quis ut nam facilis et officia qui                           │
+├────┼──────────────────────────────────────────────────────────────┤
+│ 3  │ fugiat veniam minus                                          │
+├────┼──────────────────────────────────────────────────────────────┤
+│ 4  │ et porro tempora                                             │
+├────┼──────────────────────────────────────────────────────────────┤
+│ 5  │ laboriosam mollitia et enim quasi adipisci quia provident il │
+│    │ lum                                                          │
+└────┴──────────────────────────────────────────────────────────────┘
+```
+
+:::tip
 
 Since `url` is a hidden column, you can query the url column
-in a table valued function sugar syntax, which is equivalent
-to the above:
+with the table valued function sugar syntax.
+
+The equivalent query to above using this sugar syntax is:
 
 ```sql
-SELECT * FROM todos('https://jsonplaceholder.typicode.com/todos')
-LIMIT 5;
+SELECT * FROM todos('https://jsonplaceholder.typicode.com/todos') LIMIT 5;
 ```
 
-If you're only fetching from one server, you can set a default value 
-for the `url` column in the create virtual table statement:
+:::
+
+
+If you're fetching from a single server, you can set a default value 
+for the `url` column in the `create virtual table` statement:
 
 ```sql
 DROP TABLE IF EXISTS todos;
-CREATE VIRTUAL TABLE todos USING fetch (
+
+CREATE VIRTUAL TABLE todos USING vhs (
     url TEXT DEFAULT 'https://jsonplaceholder.typicode.com/todos',
     id INT,
     title TEXT
@@ -116,4 +163,4 @@ SELECT * FROM todos LIMIT 5;
 ```
 
 In general, you *should* set a default URL if you know that you're
-only pinging 1 endpoint per `fetch` virtual table.
+only pinging 1 endpoint per `vhs` virtual table.
