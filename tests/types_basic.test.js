@@ -4,7 +4,7 @@ import { checkExtensionExists } from "./common.js";
 
 const CREATE_TODOS_TABLE = (completedType) =>
 `drop table if exists todos;
-create virtual table todos using fetch (
+create virtual table todos using vttp (
     id int,
     "userId" int,
     title text,
@@ -14,7 +14,7 @@ create virtual table todos using fetch (
 
 describe("Usual queries", () => {
     beforeAll(checkExtensionExists);
-    const db = new Database().loadExtension("./libyarts");
+    const db = new Database().loadExtension("./libvttp");
     it("maps booleans to text", () => {
         const todos = db
             .exec(CREATE_TODOS_TABLE("text"))

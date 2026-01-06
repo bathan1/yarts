@@ -22,6 +22,11 @@ struct string {
 };
 
 /**
+ * @brief Pack S of *length* (not including null terminator) LEN into a ptr + length struct.
+ */
+struct string ss(const char *s, size_t len);
+
+/**
  * @brief Allocate a string with the given format string FMT.
  *
  * It's like \c sprintf() except that it *returns* the buffer rather than making you pass it in.
@@ -56,11 +61,6 @@ struct string to_lowercase(const struct string s);
  * @retval 1 On failure, S couldn't be resolved.
  */
 int rmch(struct string *s, char ch);
-
-/**
- * Get back a #string handle of a string S with a length LEN known at call-time.
- */
-struct string ss(const char *s, size_t len);
 
 /**
  * @brief Slice a *copy* of S from START to END (exclusive).
