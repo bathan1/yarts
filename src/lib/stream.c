@@ -16,7 +16,6 @@
 struct stream_cookie_writable {
     yajl_handle parser;
     unsigned int current_depth;
-    unsigned int depth;
     struct deque8 *queue;
 
     // clarinet frees everything from here
@@ -24,7 +23,7 @@ struct stream_cookie_writable {
     size_t keys_size;
     size_t keys_cap;
     // key stack
-    char *key[MAX_DEPTH];
+    char *keystack[MAX_DEPTH];
     yyjson_mut_doc *doc_root;
     // object node stack
     yyjson_mut_val *object[MAX_DEPTH];
@@ -183,11 +182,11 @@ static int handle_null(void *ctx) {
         fprintf(stderr, "current_depth is 0\n");
         return 0;
     }
-    if (!peek(state, key)) {
+    if (!peek(state, keystack)) {
         fprintf(stderr, "no parent key value from depth %u\n", state->current_depth);
         return 0;
     }
-    yyjson_mut_obj_add_null(state->doc_root, peek(state, object), peek(state, key));
+    yyjson_mut_obj_add_null(state->doc_root, peek(state, object), peek(state, keystack));
     return 1;
 }
 
@@ -197,14 +196,14 @@ static int handle_bool(void *ctx, int b) {
         fprintf(stderr, "current_depth is 0\n");
         return 0;
     }
-    if (!peek(state, key)) {
+    if (!peek(state, keystack)) {
         fprintf(stderr, "no parent key value from depth %u\n", state->current_depth);
         return 0;
     }
     yyjson_mut_obj_add_bool(
         state->doc_root,
         peek(state, object),
-        peek(state, key),
+        peek(state, keystack),
         b
     );
     return 1;
@@ -224,7 +223,7 @@ static int handle_number(void *ctx, const char *num, size_t len) {
         fprintf(stderr, "current_depth is 0\n");
         return 0;
     }
-    if (!peek(cur, key)) {
+    if (!peek(cur, keystack)) {
         fprintf(stderr, "no parent key value from depth %u\n", cur->current_depth);
         return 0;
     }
@@ -243,7 +242,7 @@ static int handle_number(void *ctx, const char *num, size_t len) {
         yyjson_mut_obj_add_double(
             cur->doc_root,
             peek(cur, object),
-            peek(cur, key),
+            peek(cur, keystack),
             d
         );
     } else {
@@ -251,7 +250,7 @@ static int handle_number(void *ctx, const char *num, size_t len) {
         yyjson_mut_obj_add_int(
             cur->doc_root,
             peek(cur, object),
-            peek(cur, key),
+            peek(cur, keystack),
             i
         );
     }
@@ -259,19 +258,19 @@ static int handle_number(void *ctx, const char *num, size_t len) {
     return 1;
 }
 
-static int handle_string(void *ctx,
-                         const unsigned char *str, size_t len)
+static int handle_string(void *ctx, const unsigned char *str, 
+                         size_t len)
 {
     struct stream_cookie_writable *cur = ctx;
 
-    if (cur->current_depth == 0 || !peek(cur, key) || !peek(cur, object)) {
+    if (cur->current_depth == 0 || !peek(cur, keystack) || !peek(cur, object)) {
         return 0;
     }
 
     yyjson_mut_obj_add_strncpy(
         cur->doc_root,
         peek(cur, object),
-        peek(cur, key),
+        peek(cur, keystack),
         (char *) str,
         len
     );
@@ -292,7 +291,7 @@ static int handle_start_map(void *ctx) {
         yyjson_mut_obj_add_val(
             cur->doc_root,
             peek(cur, object),
-            peek(cur, key),
+            peek(cur, keystack),
             new_obj
         );
         cur->object[cur->current_depth] = new_obj;
@@ -318,7 +317,7 @@ static int handle_map_key(void *ctx,
     char *next_key = strndup((const char *) str, len);
     cur->keys[cur->keys_size++] = next_key;
     // Store the new key for this depth
-    peek(cur, key) = next_key;
+    peek(cur, keystack) = next_key;
 
     return 1;
 }
@@ -354,7 +353,6 @@ static int handle_end_map(void *ctx) {
         yyjson_doc_free(final);
     }
     cur->current_depth--;
-    cur->depth = MAX(cur->current_depth, cur->depth);
 
     return 1;
 }
