@@ -1,9 +1,11 @@
+#include "cfns.h"
+
+#include <errno.h>
 #include <stdlib.h>
 #define _GNU_SOURCE
 #include <yyjson.h>
 #include <yajl/yajl_parse.h>
 
-#include "cfns.h"
 
 /** Fixed number of JSON object levels to traverse before returning. */
 #define MAX_DEPTH 64
@@ -366,6 +368,31 @@ static void free_state(struct stream_state *st) {
         free(st->keys);
 
     free(st);
+}
+
+size_t fwrite8(const char *src, size_t n,
+               size_t max, FILE *dst)
+{
+    size_t to_copy = n < max ? n : max;
+    size_t written = fwrite(src, sizeof(char), to_copy, dst);
+    if (written == 0) {
+        int err = errno;
+        if (ferror(dst)) {
+            fprintf(
+                stderr,
+                "[fwrite8] write failed (requested %zu bytes)",
+                to_copy
+            );
+        }
+
+        if (err != 0) {
+            char *errmsg = strerror(err);
+            fprintf(stderr, ": %s", errmsg);
+            free(errmsg);
+        }
+        fprintf(stderr, "\n");
+    }
+    return written;
 }
 
 #undef push

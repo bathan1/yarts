@@ -2,6 +2,7 @@
 
 #include "tcp.h"
 #include "fetch.h"
+#include "stream.h"
 
 #include <netdb.h>
 #include <openssl/types.h>
@@ -289,16 +290,7 @@ static void handle_http_body_bytes(struct fetch_state *st,
 {
 
     if (!st->chunked_mode && st->content_length > 0) {
-        // Then server gave us content-length
-        size_t to_copy = (len < st->content_length) ? len : st->content_length;
-
-        // Feed payload bytes to body stream write end
-        size_t written = fwrite(data, 1, to_copy, st->stream[0]);
-        if (written == 0 && ferror(st->stream[0])) {
-            // TODO: handle pipe error
-        }
-
-        st->content_length -= written;
+        st->content_length -= fwrite8(data, len, st->content_length, st->stream[0]);
     } else {
         size_t i = 0;
         while (i < len) {
