@@ -85,13 +85,16 @@ const config: Config = {
           position: 'left',
           label: 'Tutorial',
         },
-        {to: '/blog', label: 'Blog', position: 'left'},
-        {href: "https://bathan1.github.io/vttp/index.html", label: "API reference", position: "left"},
         {
           href: "https://github.com/bathan1/vttp",
           label: 'GitHub',
           position: 'right',
-        }
+        },
+        {
+          href: "https://bathan1.github.io/vttp/index.html",
+          label: "API reference",
+          position: "right"
+        },
       ],
     },
     footer: {

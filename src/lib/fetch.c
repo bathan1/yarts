@@ -37,9 +37,6 @@ void dispatch_free(struct dispatch *dispatch) {
         dispatch->addrinfo = NULL;
     }
     free(dispatch);
-    // if (dispatch->ssl || dispatch->ctx) {
-    //     tls_free(dispatch->ssl, dispatch->ctx);
-    // }
 }
 
 static struct url *url_of_string(const char *url);
@@ -82,9 +79,9 @@ int use_fetch(int fds[4], struct dispatch *dispatch) {
         dispatch->sockfd, dispatch->addrinfo->ai_addr, dispatch->addrinfo->ai_addrlen,
         ssl, ctx, hostname) < 0) {
         return perror_rc(-1, "ttcp_connect()",
-            close(dispatch->sockfd),
-            dispatch_free(dispatch)
-        );
+                         close(dispatch->sockfd),
+                         dispatch_free(dispatch)
+                         );
     }
 
     // make recv() nonblocking
@@ -94,7 +91,7 @@ int use_fetch(int fds[4], struct dispatch *dispatch) {
     struct string GET = dynamic(
         "GET %s HTTP/1.1\r\n"
         "Host: %s\r\n"
-        "User-Agent: yarts/1.0\r\n"
+        "User-Agent: vttp/1.0\r\n"
         "Accept: */*\r\n"
         "Connection: close\r\n"
         "\r\n",
@@ -102,7 +99,7 @@ int use_fetch(int fds[4], struct dispatch *dispatch) {
         dispatch->url.host.hd
     );
     if (!GET.hd) {
-        return perror_rc(-1, "prefix()", close(dispatch->sockfd), dispatch_free(dispatch));
+        return perror_rc(-1, "dynamic()", close(dispatch->sockfd), dispatch_free(dispatch));
     }
 
     if (ttcp_send(dispatch->sockfd, GET.hd, GET.length, is_tls ? *ssl : NULL) < 0) {
@@ -166,12 +163,12 @@ void *fetcher(void *arg) {
             uint32_t ev = events[i].events;
 
             /* New data from the network */
-            if (fd == fs->netfd && (ev & EPOLLIN)) {
-                if (!fs->headers_done)
-                    handle_http_headers(fs);
-                else
-                    handle_http_body(fs);
+            if (!fs->headers_done) {
+                handle_http_headers(fs);
+            } else {
+                handle_http_body(fs);
             }
+
         }
     }
 
@@ -292,86 +289,99 @@ static void handle_http_body_bytes(struct fetch_state *st,
 {
     size_t i = 0;
 
-    while (i < len) {
-        /* 1. READ THE CHUNK-SIZE LINE */
-        if (st->reading_chunk_size) {
-            char c = data[i++];
+    if (!st->chunked_mode && st->content_length > 0) {
+        while (i < len) {
+            // then server gave us content-length
+            size_t available = len - i;
+            size_t to_copy = (available < st->content_length) ? available : st->content_length;
 
-            // Accumulate until CRLF
-            if (c == '\r') {
-                continue; // skip
-            }
+            // Feed payload bytes to body stream write end
+            fwrite(data + i, 1, to_copy, st->stream[0]);
 
-            if (c == '\n') {
-                // End of chunk-size line
-                st->chunk_line[st->chunk_line_len] = '\0';
+            i += to_copy;
+        }
+    } else {
+        while (i < len) {
+            if (st->reading_chunk_size) {
+                char c = data[i++];
 
-                // Hex decode the chunk size
-                st->current_chunk_size =
-                    strtoul(st->chunk_line, NULL, 16);
+                // Accumulate until CRLF
+                if (c == '\r') {
+                    continue; // skip
+                }
 
-                st->chunk_line_len = 0;
+                if (c == '\n') {
+                    // End of chunk-size line
+                    st->chunk_line[st->chunk_line_len] = '\0';
 
-                if (st->current_chunk_size == 0) {
-                    st->http_done = true;
-                } else {
-                    st->reading_chunk_size = false;
+                    // Hex decode the chunk size
+                    st->current_chunk_size =
+                        strtoul(st->chunk_line, NULL, 16);
+
+                    st->chunk_line_len = 0;
+
+                    if (st->current_chunk_size == 0) {
+                        st->http_done = true;
+                    } else {
+                        st->reading_chunk_size = false;
+                    }
+
+                    continue;
+                }
+
+                if (st->chunk_line_len < sizeof(st->chunk_line) - 1) {
+                    st->chunk_line[st->chunk_line_len++] = c;
                 }
 
                 continue;
             }
 
-            if (st->chunk_line_len < sizeof(st->chunk_line) - 1) {
-                st->chunk_line[st->chunk_line_len++] = c;
-            }
+            /* 2. READ CHUNK PAYLOAD */
+            if (!st->reading_chunk_size && st->current_chunk_size > 0) {
+                size_t available = len - i;
+                size_t need = st->current_chunk_size;
 
-            continue;
-        }
+                size_t to_copy = (available < need) ? available : need;
 
-        /* 2. READ CHUNK PAYLOAD */
-        if (!st->reading_chunk_size && st->current_chunk_size > 0) {
-            size_t available = len - i;
-            size_t need = st->current_chunk_size;
+                // Feed payload bytes to body stream write end
+                fwrite(data + i, 1, to_copy, st->stream[0]);
 
-            size_t to_copy = (available < need) ? available : need;
+                i += to_copy;
+                st->current_chunk_size -= to_copy;
 
-            // Feed payload bytes to streamoon parser
-            fwrite(data + i, 1, to_copy, st->stream[0]);
-
-            i += to_copy;
-            st->current_chunk_size -= to_copy;
-
-            // If not enough bytes to finish payload, exit now
-            if (st->current_chunk_size > 0) {
-                return;
-            }
-
-            // Payload exactly finished expect CRLF next
-            // so switch to CRLF-skip mode
-            if (st->current_chunk_size == 0) {
-                // Next bytes should be "\r\n"
-                st->reading_chunk_size = false; // momentary
-                st->expecting_crlf = 2;
-            }
-
-            continue;
-        }
-
-        /* 3. SKIP CRLF AFTER PAYLOAD */
-        if (st->expecting_crlf > 0) {
-            char c = data[i++];
-            if (c == '\r' || c == '\n') {
-                st->expecting_crlf--;
-                if (st->expecting_crlf == 0) {
-                    // Now start the next chunk-size line
-                    st->reading_chunk_size = true;
+                // If not enough bytes to finish payload, exit now
+                if (st->current_chunk_size > 0) {
+                    return;
                 }
-            }
-            continue;
-        }
 
-        /* Should not reach here */
-        i++;
+                // Payload exactly finished expect CRLF next
+                // so switch to CRLF-skip mode
+                if (st->current_chunk_size == 0) {
+                    // Next bytes should be "\r\n"
+                    st->reading_chunk_size = false; // momentary
+                    st->expecting_crlf = 2;
+                }
+
+                continue;
+            }
+
+            /* 3. SKIP CRLF AFTER PAYLOAD */
+            if (st->expecting_crlf > 0) {
+                char c = data[i++];
+                if (c == '\r' || c == '\n') {
+                    st->expecting_crlf--;
+                    if (st->expecting_crlf == 0) {
+                        // Now start the next chunk-size line
+                        st->reading_chunk_size = true;
+                    }
+                }
+                continue;
+            }
+
+            /* 1. READ THE CHUNK-SIZE LINE */
+            /* Should not reach here */
+            i++;
+        }
     }
 }
 
@@ -396,7 +406,6 @@ static bool handle_http_headers(struct fetch_state *st) {
                 if (memmem(st->header_buf, st->header_len, "\r\n\r\n", 4)) {
 
                     st->headers_done = true;
-
                     // OPTIONAL: parse headers here
                     parse_http_headers(st);
 
@@ -412,7 +421,7 @@ static bool handle_http_headers(struct fetch_state *st) {
                     if (leftover > 0) {
                         // feed to body parser immediately
                         handle_http_body_bytes(st,
-                              st->header_buf + header_end, leftover);
+                                               st->header_buf + header_end, leftover);
                     }
 
                     return true; // done with headers

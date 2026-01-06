@@ -46,12 +46,9 @@ FILE *fetch(const char *url, const char *init[4]) {
         return NULL;
     }
 
-    fs->ssl = dispatch->ssl;
-    fs->ssl_ctx = dispatch->ctx;
-    fs->netfd = fds[0];
+    fs->ssl = dispatch->ssl, fs->ssl_ctx = dispatch->ctx;
+    fs->netfd = fds[0], fs->outfd = fds[2], fs->ep = fds[3];
     int appfd = fds[1];
-    fs->outfd = fds[2];
-    fs->ep = fds[3];
     fs->headers_done = false;
     fs->header_len = 0;
     fs->hostname = hostname;
@@ -69,11 +66,9 @@ FILE *fetch(const char *url, const char *init[4]) {
     fs->http_done = false;
 
     // spawn background worker thread
-    pthread_t tid;
+    pthread_t tid = 0;
     pthread_create(&tid, NULL, fetcher, fs);
-
-    // detach so it cleans up after finishing
-    pthread_detach(tid);
+    pthread_detach(tid); // detach so it cleans up after finishing
 
     FILE *fetchfile = fdopen(appfd, "r");
     if (!fetchfile) {

@@ -1,5 +1,5 @@
 ---
-sidebar_position: 2
+sidebar_position: 3
 ---
 
 # Read JSON
@@ -19,7 +19,7 @@ The VTTP virtual table was designed to work with JSONs by default.
 
 ## From `object` to Rows
 
-Incoming data is the payload you receive from an HTTP `GET` request, which yarts
+Incoming data is the payload you receive from an HTTP `GET` request, which `vttp`
 maps to a `SELECT` query against a Fetch virtual table.
 
 ```sql
@@ -82,7 +82,7 @@ CREATE VIRTUAL TABLE todos USING vttp (
 SELECT * FROM todos LIMIT 5;
 ```
 
-Then yarts will map booleans to their text representation `true` and `false`:
+Then VTTP will map booleans to their text representation `true` and `false`:
 
 ```bash
 ┌────┬────────┬──────────────────────────────────────────────────────────────┬───────────┐

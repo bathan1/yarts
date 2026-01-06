@@ -77,7 +77,7 @@ yyjson_doc *read_next_json_object(FILE *stream, char **errmsg) {
     ssize_t n = getline(&buf, &cap, stream);
     if (n == -1) {
         if (errmsg) {
-            *errmsg = sqlite3_mprintf("(vhs) no body stream");
+            *errmsg = sqlite3_mprintf("(vttp) no body stream");
         }
         free(buf);
         return NULL;
@@ -93,7 +93,7 @@ yyjson_doc *read_next_json_object(FILE *stream, char **errmsg) {
     yyjson_doc *doc = yyjson_read(buf, n, 0);
     if (!doc) {
         if (errmsg) {
-            *errmsg = sqlite3_mprintf("(vhs) invalid json object");
+            *errmsg = sqlite3_mprintf("(vttp) invalid json object");
         }
         free(buf);
         return NULL;
@@ -237,22 +237,24 @@ static bool is_url_set_index_constraint(struct sqlite3_index_constraint *cst) {
 /* expected bitmask value of the index_info from xBestIndex */
 #define REQUIRED_BITS 0b01
 
-/**
- * Check INDEX_INFO value against REQUIRED_BITS mask.
- */
+/** Check INDEX_INFO value against REQUIRED_BITS mask. */
 static int check_plan_mask(struct sqlite3_index_info *index_info,
-                           sqlite3_vtab *pVtab) {
-    if ((index_info->idxNum & REQUIRED_BITS) == REQUIRED_BITS)
+                           sqlite3_vtab *pVtab)
+{
+    Fetch *vtab = (void *) pVtab;
+    if ((index_info->idxNum & REQUIRED_BITS) == REQUIRED_BITS
+        || (vtab->column_defs[FETCH_URL].default_value.length > 0))
+    { // Then either a `where url = ...` or a default value was set (or both)
         return SQLITE_OK;
+    }
 
-    int is_url_eq_cst = 0;
+    bool is_url_eq_cst = false;
 
     for (int i = 0; i < index_info->nConstraint; i++) {
         struct sqlite3_index_constraint *cst = &index_info->aConstraint[i];
 
         if (cst->iColumn == FETCH_URL) {
-            // User passed in a "url" constraint but it still errored...
-            is_url_eq_cst = 1;
+            is_url_eq_cst = true; // User passed "url" constraint but it somehow failed...
             if (!cst->usable) {
                 return SQLITE_CONSTRAINT;
             }
@@ -260,15 +262,15 @@ static int check_plan_mask(struct sqlite3_index_info *index_info,
     }
 
     if (!is_url_eq_cst) {
-        Fetch *vtab = (void *) pVtab;
-        if (!vtab->column_defs[FETCH_URL].default_value.hd) {
+        if (vtab->column_defs[FETCH_URL].default_value.length < 1) {
             pVtab->zErrMsg = sqlite3_mprintf(
-                "fetch SELECT needs a `WHERE url = 'something'` clause when no default url is set.\n");
-            return SQLITE_ERROR;
+                "(vttp) Missing `WHERE url = ...` (no default URL)."
+            );
+            return SQLITE_MISUSE;
         }
     }
 
-    return SQLITE_OK;
+    return SQLITE_ERROR;
 }
 
 /**
@@ -292,7 +294,7 @@ static int xBestIndex(sqlite3_vtab *pVTab, sqlite3_index_info *pIdxInfo) {
             usage->omit = 1;
             usage->argvIndex = argPos++;
             planMask |= 0b01;
-        }
+        } 
     }
 
     pIdxInfo->idxNum = planMask;
@@ -475,7 +477,6 @@ static int xEof(sqlite3_vtab_cursor *cur) {
     return rc;
 }
 
-/// API: `sqlite3_vtab.xRowid()`
 static int xRowid(sqlite3_vtab_cursor *pcursor, sqlite3_int64 *prowid) {
     *prowid = ((fetch_cursor_t *)pcursor)->count;
     return SQLITE_OK;
@@ -488,9 +489,7 @@ static int xFilter(sqlite3_vtab_cursor *cur0,
     Fetch *vtab = (Fetch*)cur0->pVtab;
     fetch_cursor_t *Cur = (fetch_cursor_t*)cur0;
 
-    Cur->eof       = 0;
-    Cur->count     = 0;
-    Cur->next_doc  = NULL;
+    Cur->eof = 0, Cur->count = 0, Cur->next_doc = NULL;
 
     // Extract URL
     if (argc == 0 && !vtab->column_defs[FETCH_URL].default_value.hd) {
