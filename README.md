@@ -41,7 +41,7 @@ make
 And that's it!
 
 ## Other Scripts
-To install / uninstall the VHS API header `vapi.h` from your usr local lib:
+To install / uninstall the VTTP API header `vapi.h` from your usr local lib:
 
 ```bash
 sudo make install
