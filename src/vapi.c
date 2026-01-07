@@ -7,27 +7,6 @@
 #include <string.h>
 #include <unistd.h>
 
-int streamify(FILE *files[2]) {
-    struct deque8 *dq = calloc(1, sizeof(struct deque8));
-    if (!dq) {
-        return perror_rc(-1, "calloc", deque8_free(dq));
-    }
-    deque8_init(dq);
-
-    FILE *writable = wstream(dq);
-    if (!writable) {
-        return perror_rc(-1, "wstream", deque8_free(dq));
-    }
-    FILE *readable = rstream(dq);
-    if (!readable) {
-        return perror_rc(-1, "rstream", fclose(writable), deque8_free(dq));
-    }
-
-    files[0] = writable;
-    files[1] = readable;
-    return 0;
-}
-
 FILE *fetch(const char *url, const char *init[4]) {
     int fds[4] = {0};
     struct dispatch *dispatch = fetch_socket(url, init);
@@ -60,9 +39,6 @@ FILE *fetch(const char *url, const char *init[4]) {
     fs->chunk_line_len = 0;
 
     fs->stream = cookie();
-    // if (streamify(fs->stream) != 0) {
-    //     return perror_rc(NULL, "streamify()", close(appfd));
-    // }
 
     fs->http_done = false;
 

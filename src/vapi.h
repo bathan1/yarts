@@ -2,31 +2,13 @@
  * @file vapi.h
  * @brief Yet Another Runtime TCP Stream internal functions API
  *
- * Helper functions #vhs.c has available.
- *
- * @example stream_print.c
- * `gcc stream_print.c -lvapi -o stream_print`
+ * Helper functions #vttp.c has available.
  *
  * @example fetch_print.c
  * `gcc fetch_print.c -lvapi -o fetch_print`
  */
 #pragma once
 #include <stdio.h>
-
-/**
- * @brief Make FILES[1] write to readable FILES[0].
- *
- * Opens a unidirectional pipe where you write into `FILES[0]` and 
- * read from `FILES[1]`, just like posix pipes but with in-memory FILE
- * handles.
- *
- * @retval  0  Success. `FILES[0]` and `FILES[1]` are fully initialized.
- * @retval -1  Error. `FILES` is left unchanged and errno is set.
- *
- * ### Example with manual JSON
- * @snippet stream_print.c Stream basic usage
- */
-int streamify(FILE *files[2]);
 
 /**
  * @brief \c send() HTTP Request over a TCP socket, wrapping the response socket over

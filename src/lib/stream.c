@@ -18,7 +18,7 @@ typedef struct jsonpath {
     struct string key;
 } jsonpath;
 
-struct stream_cookie_writable {
+struct cookie_writable {
     yajl_handle parser;
     unsigned int current_depth;
     struct deque8 *queue;
@@ -36,7 +36,7 @@ struct stream_cookie_writable {
     unsigned int pp_flags;
 };
 
-struct stream_cookie_readable {
+struct cookie_readable {
     struct deque8 *queue;
     char *current;
     size_t length;
@@ -44,152 +44,12 @@ struct stream_cookie_readable {
     bool emit_newline;
 };
 typedef struct cookie {
-    struct stream_cookie_writable writable;
-
-    struct stream_cookie_readable readable;
+    struct cookie_writable writable;
+    struct cookie_readable readable;
 } cookie_t;
 
-
-
-/** YAJL parser callbacks */
-static yajl_callbacks callbacks;
-/** Close write end @ COOKIE. */
-static ssize_t stream_fwrite(void *cookie, const char *buf, size_t size);
-/** Close read end @ COOKIE. */
-static ssize_t stream_fread(void *cookie, char *buf, size_t size);
-static int stream_fclosew(void *cookie);
-static int stream_fcloser(void *cookie);
-
-/** Initialize bassoon state on the heap and get back that pointer. */
-static struct stream_cookie_writable *use_state();
-static void free_state(struct stream_cookie_writable *writable);
-
-FILE *rstream(struct deque8 *init) {
-    cookie_io_functions_t io = {
-        .read  = stream_fread,
-        .close = stream_fcloser,
-        .write = NULL,
-        .seek  = NULL,
-    };
-
-    struct stream_cookie_readable *readable = calloc(1, sizeof(struct stream_cookie_readable));
-    readable->queue = init;
-    return fopencookie(readable, "r", io);
-}
-
-FILE *wstream(struct deque8 *init) {
-    struct stream_cookie_writable *writable = use_state();
-    if (!writable) {
-        perror("use_state");
-        return NULL;
-    }
-    writable->queue = init;
-    writable->parser = yajl_alloc(&callbacks, NULL, (void *) writable);
-    if (!writable->parser) {
-        perror("yajl_alloc");
-        free(writable);
-        return NULL;
-    }
-
-    cookie_io_functions_t io = {
-        .write = stream_fwrite,
-        .close = stream_fclosew,
-        .read  = NULL,
-        .seek  = NULL,
-    };
-
-    return fopencookie(writable, "w", io);
-}
-
-/* BEGIN STATIC */
-static ssize_t stream_fwrite(void *cookie, const char *buf, size_t size) {
-    struct stream_cookie_writable *c = cookie;
-    yajl_parse(c->parser, (const unsigned char *)buf, size);
-    return size;
-}
-
-static int stream_fclosew(void *cookie) {
-    struct stream_cookie_writable *cc = (void *) cookie;
-    if (!cc) {
-        return 1;
-    }
-
-    if (cc->parser) {
-        yajl_free(cc->parser);
-    }
-    if (cc->keys) {
-        free(cc->keys);
-    }
-    free(cc);
-
-    return 0;
-}
-
-static ssize_t stream_fread(void *cookie, char *buf, size_t size)
-{
-    struct stream_cookie_readable *c = cookie;
-
-    if (size == 0)
-        return 0;
-
-    size_t out = 0;
-
-    while (out < size) {
-
-        /* Emit newline if pending */
-        if (c->emit_newline) {
-            buf[out++] = '\n';
-            c->emit_newline = false;
-            return out;   // return immediately (stream semantics)
-        }
-
-        /* Load next JSON object if needed */
-        if (!c->current) {
-            c->current = deque8_pop(c->queue);
-            if (!c->current)
-                return out;  // EOF if nothing written
-
-            c->length = strlen(c->current);
-            c->offset = 0;
-        }
-
-        /* Emit JSON bytes */
-        size_t remaining = c->length - c->offset;
-        size_t to_copy = remaining < (size - out)
-            ? remaining
-            : (size - out);
-
-        memcpy(buf + out, c->current + c->offset, to_copy);
-
-        c->offset += to_copy;
-        out += to_copy;
-
-        /* Finished this object */
-        if (c->offset == c->length) {
-            free(c->current);
-            c->current = NULL;
-            c->emit_newline = true;  // <-- CRITICAL
-        }
-
-        /* Return once we’ve produced something */
-        if (out > 0)
-            return out;
-    }
-
-    return out;
-}
-
-static int stream_fcloser(void *cookie) {
-    struct stream_cookie_readable *state = cookie;
-    struct deque8 *queue = (void *) state->queue;
-    if (!queue) { return 1; }
-    deque8_free(queue);
-    free(state);
-    return 0;
-}
-
 static int handle_null(void *ctx) {
-    struct stream_cookie_writable *state = ctx;
+    struct cookie_writable *state = ctx;
     if (state->current_depth == 0) {
         fprintf(stderr, "current_depth is 0\n");
         return 0;
@@ -203,7 +63,7 @@ static int handle_null(void *ctx) {
 }
 
 static int handle_bool(void *ctx, int b) {
-    struct stream_cookie_writable *state = ctx;
+    struct cookie_writable *state = ctx;
     if (state->current_depth == 0) {
         fprintf(stderr, "current_depth is 0\n");
         return 0;
@@ -230,7 +90,7 @@ static int handle_double(void *ctx, double d) {
 }
 
 static int handle_number(void *ctx, const char *num, size_t len) {
-    struct stream_cookie_writable *cur = ctx;
+    struct cookie_writable *cur = ctx;
     if (cur->current_depth == 0) {
         fprintf(stderr, "current_depth is 0\n");
         return 0;
@@ -273,7 +133,7 @@ static int handle_number(void *ctx, const char *num, size_t len) {
 static int handle_string(void *ctx, const unsigned char *str, 
                          size_t len)
 {
-    struct stream_cookie_writable *cur = ctx;
+    struct cookie_writable *cur = ctx;
 
     if (cur->current_depth == 0 || !peek(cur, keystack) || !peek(cur, object)) {
         return 0;
@@ -291,7 +151,7 @@ static int handle_string(void *ctx, const unsigned char *str,
 }
 
 static int handle_start_map(void *ctx) {
-    struct stream_cookie_writable *cur = ctx;
+    struct cookie_writable *cur = ctx;
     if (cur->current_depth == 0) {
         yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
         yyjson_mut_val *obj = yyjson_mut_obj(doc);
@@ -319,7 +179,7 @@ static int handle_map_key(void *ctx,
                           const unsigned char *str,
                           size_t len)
 {
-    struct stream_cookie_writable *cur = ctx;
+    struct cookie_writable *cur = ctx;
     if (cur->keys_size >= cur->keys_cap) {
         // double
         cur->keys_cap *= 2;
@@ -335,7 +195,7 @@ static int handle_map_key(void *ctx,
 }
 
 static int handle_end_map(void *ctx) {
-    struct stream_cookie_writable *cur = ctx;
+    struct cookie_writable *cur = ctx;
     if (cur->current_depth == 1) {
         // closing root object because root object set depth to 1,
         // so that any nested object child can recursively push its own
@@ -393,8 +253,8 @@ static yajl_callbacks callbacks = {
     .yajl_end_array   = handle_end_array
 };
 
-static struct stream_cookie_writable *use_state(void) {
-    struct stream_cookie_writable *st = calloc(1, sizeof(struct stream_cookie_writable));
+static struct cookie_writable *use_state(void) {
+    struct cookie_writable *st = calloc(1, sizeof(struct cookie_writable));
     if (!st) return perror_rc(NULL, "calloc()", 0);
 
     st->keys_cap = 1 << 8;     // 256
@@ -410,7 +270,7 @@ static struct stream_cookie_writable *use_state(void) {
     return st;
 }
 
-static void free_state(struct stream_cookie_writable *st) {
+static void free_state(struct cookie_writable *st) {
     if (!st) return;
 
     // Don't free st->queue here — it's not owned by the state!
@@ -574,30 +434,3 @@ FILE *cookie() {
 #undef push
 #undef peek
 #undef MAX_DEPTH
-
-int main() {
-    jsonpath resource = {
-        .key = String("resource"),
-        .is_array = false,
-        .next = NULL
-    };
-    jsonpath entry = {
-        .key = String("entry"),
-        .is_array = true,
-        .next = &resource
-    };
-
-    FILE *handle = cookie();
-
-    char bundle[] = "{\"resourceType\": \"Bundle\", \"entry\": [{\"resource\": {\"resourceType\": \"Patient\"}}]}";
-
-    fwrite8(bundle, sizeof(bundle) - 1, 0, handle);
-    char *bundle_returned = NULL;
-    size_t cap = 0;
-    fflush(handle);
-    rewind(handle);
-    getline(&bundle_returned, &cap, handle);
-
-    printf("%s", bundle_returned);
-    return 0;
-}
