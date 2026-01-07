@@ -13,4 +13,9 @@
  */
 size_t fwrite8(const char *src, size_t n,
                size_t max, FILE *dst);
-FILE *cookie();
+FILE *cookie(cookie_io_functions_t io);
+
+/**
+ * JSON object list stream. It separates elements by newline '\n', so it's basically NDJSON.
+ */
+extern const cookie_io_functions_t COOKIE_JSON;

@@ -390,7 +390,14 @@ static ssize_t cookie_json_fread(void *__cookie, char *buf, size_t size)
 }
 
 
-FILE *cookie() {
+const cookie_io_functions_t COOKIE_JSON = {
+    .write = cookie_json_fwrite,
+    .close = cookie_json_fclose,
+    .read  = cookie_json_fread,
+    .seek  = NULL,
+};
+
+FILE *cookie(cookie_io_functions_t io) {
     cookie_t *cookie = calloc(1, sizeof(cookie_t));
     if (!cookie) {
         return enomem(NULL);
@@ -419,14 +426,8 @@ FILE *cookie() {
         return enomem(NULL);
     }
     
-    cookie_io_functions_t COOKIE_JSON = {
-        .write = cookie_json_fwrite,
-        .close = cookie_json_fclose,
-        .read  = cookie_json_fread,
-        .seek  = NULL,
-    };
 
-    FILE *f = fopencookie(cookie, "w+", COOKIE_JSON);
+    FILE *f = fopencookie(cookie, "w+", io);
     setvbuf(f, NULL, _IONBF, 0);
     return f;
 }
