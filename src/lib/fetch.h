@@ -88,7 +88,7 @@ struct fetch_state {
     size_t current_chunk_size;  // remaining bytes in current chunk
     int expecting_crlf;         // 2 -> expecting "\r\n"
 
-    FILE *stream[2];
+    FILE *stream;
 
     /* --- NONBLOCKING SEND STATE FOR outfd --- */
     char *pending_buf;         // partial write buffer (JSON object)

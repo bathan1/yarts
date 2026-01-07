@@ -23,3 +23,4 @@ FILE *wstream(struct deque8 *deque);
  */
 size_t fwrite8(const char *src, size_t n,
                size_t max, FILE *dst);
+FILE *cookie();

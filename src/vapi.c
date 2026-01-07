@@ -59,9 +59,10 @@ FILE *fetch(const char *url, const char *init[4]) {
     fs->reading_chunk_size = true;
     fs->chunk_line_len = 0;
 
-    if (streamify(fs->stream) != 0) {
-        return perror_rc(NULL, "streamify()", close(appfd));
-    }
+    fs->stream = cookie();
+    // if (streamify(fs->stream) != 0) {
+    //     return perror_rc(NULL, "streamify()", close(appfd));
+    // }
 
     fs->http_done = false;
 

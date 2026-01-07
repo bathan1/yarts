@@ -530,7 +530,7 @@ static ssize_t cookie_json_fread(void *__cookie, char *buf, size_t size)
 }
 
 
-FILE *cookie(jsonpath *path) {
+FILE *cookie() {
     cookie_t *cookie = calloc(1, sizeof(cookie_t));
     if (!cookie) {
         return enomem(NULL);
@@ -558,7 +558,6 @@ FILE *cookie(jsonpath *path) {
         free(cookie);
         return enomem(NULL);
     }
-    printf("writable.parser=%p\n", cookie->writable.parser);
     
     cookie_io_functions_t COOKIE_JSON = {
         .write = cookie_json_fwrite,
@@ -588,7 +587,7 @@ int main() {
         .next = &resource
     };
 
-    FILE *handle = cookie(&entry);
+    FILE *handle = cookie();
 
     char bundle[] = "{\"resourceType\": \"Bundle\", \"entry\": [{\"resource\": {\"resourceType\": \"Patient\"}}]}";
 

@@ -173,14 +173,18 @@ void *fetcher(void *arg) {
         }
     }
 
-    fclose(fs->stream[0]);
-    fs->stream[0] = NULL;
+    /* Finish writes */
+    fflush(fs->stream);
 
-    /* There may still be unflushed parsed objects */
+    /* REQUIRED: switch from write → read */
+    rewind(fs->stream);
+
+    /* Drain parsed output */
     flush_stream(fs);
 
-    fclose(fs->stream[1]);
-    fs->stream[1] = NULL;
+    /* Close once */
+    fclose(fs->stream);
+    fs->stream = NULL;
 
     ttcp_tls_free(fs->ssl, fs->ssl_ctx);
 
@@ -290,7 +294,7 @@ static void handle_http_body_bytes(struct fetch_state *st,
 {
 
     if (!st->chunked_mode && st->content_length > 0) {
-        st->content_length -= fwrite8(data, len, st->content_length, st->stream[0]);
+        st->content_length -= fwrite8(data, len, st->content_length, st->stream);
     } else {
         size_t i = 0;
         while (i < len) {
@@ -330,7 +334,7 @@ static void handle_http_body_bytes(struct fetch_state *st,
 
             /* 2. READ CHUNK PAYLOAD */
             if (!st->reading_chunk_size && st->current_chunk_size > 0) {
-                size_t written = fwrite8(data + i, len - i, st->current_chunk_size, st->stream[0]);
+                size_t written = fwrite8(data + i, len - i, st->current_chunk_size, st->stream);
                 i += written;
                 st->current_chunk_size -= written;
 
@@ -491,7 +495,7 @@ static bool flush_pending(struct fetch_state *st) {
 }
 
 static void flush_stream(struct fetch_state *st) {
-    FILE *rd = st->stream[1];
+    FILE *rd = st->stream;
     int out = st->outfd;
 
     /* 1. Handle pending partial send */
