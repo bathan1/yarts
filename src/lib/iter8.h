@@ -22,11 +22,6 @@ struct list {
  */
 struct list *__list_next(struct list *ls);
 
-/**
- * Size of the **buffer** in LS, NOT the list length.
- */
-size_t __list_len(struct list *ls);
-
 const char *__list_peek(struct list *ls);
 
 void __list_done(struct list *ls);
