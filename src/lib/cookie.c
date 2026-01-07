@@ -1,5 +1,5 @@
 #include "cfns.h"
-#include "iter8.h"
+#include "pyc.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -263,8 +263,8 @@ static int handle_map_key(void *ctx,
     struct json_writable *cur = ctx;
     char *next_key = strndup((const char *) str, length);
     if (cur->path 
-        && length == cur->path->length
-        && strncmp(next_key, peek(cur->path), length) == 0)
+        && length == get(cur->path).length
+        && strncmp(next_key, get(cur->path).val, length) == 0)
     {
         if (next(cur->path) == NULL && cur->path_parent == NULL) {
             // this will only run once since path_parent is the same for every row
