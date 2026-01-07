@@ -1,4 +1,5 @@
 #include "cfns.h"
+#include "stream.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -17,6 +18,80 @@ typedef struct jsonpath {
     bool is_array;
     struct string key;
 } jsonpath;
+
+struct cookie {
+    const cookie_io_functions_t ops;
+
+    void *(*init)(void);          // allocate backend state
+    void  (*destroy)(void *);     // free backend state
+};
+
+struct passthrough_state {
+    struct deque8 *queue;
+};
+
+static ssize_t passthrough_write(void *c, const char *buf, size_t n) {
+    struct passthrough_state *st = c;
+    char *copy = malloc(n);
+    memcpy(copy, buf, n);
+    deque8_push(st->queue, copy);
+    return n;
+}
+
+static ssize_t passthrough_read(void *c, char *buf, size_t n) {
+    struct passthrough_state *st = c;
+    char *cur = deque8_pop(st->queue);
+    if (!cur) return 0;
+    size_t len = strlen(cur);
+    size_t out = len < n ? len : n;
+    memcpy(buf, cur, out);
+    free(cur);
+    return out;
+}
+
+static int passthrough_close(void *c) {
+    struct passthrough_state *st = c;
+    deque8_free(st->queue);
+    free(st);
+    return 0;
+}
+
+static void *passthrough_init(void) {
+    struct passthrough_state *st = calloc(1, sizeof *st);
+    if (!st)
+        return NULL;
+
+    st->queue = calloc(1, sizeof *st->queue);
+    if (!st->queue) {
+        free(st);
+        return NULL;
+    }
+
+    deque8_init(st->queue);
+    return st;
+}
+
+static void passthrough_destroy(void *state) {
+    struct passthrough_state *st = state;
+    if (!st)
+        return;
+
+    if (st->queue)
+        deque8_free(st->queue);
+
+    free(st);
+}
+
+const struct cookie COOKIE_PASSTHROUGH = {
+    .ops = {
+        .write = passthrough_write,
+        .read  = passthrough_read,
+        .close = passthrough_close,
+        .seek  = NULL,
+    },
+    .init = passthrough_init,
+    .destroy = passthrough_destroy,
+};
 
 struct cookie_writable {
     yajl_handle parser;
@@ -42,10 +117,10 @@ struct cookie_readable {
     size_t offset;
     bool emit_newline;
 };
-typedef struct cookie {
+typedef struct json {
     struct cookie_writable writable;
     struct cookie_readable readable;
-} cookie_t;
+} json_t;
 
 static int handle_null(void *ctx) {
     struct cookie_writable *state = ctx;
@@ -303,14 +378,14 @@ size_t fwrite8(const char *src, size_t n, FILE *dst)
 }
 
 static ssize_t cookie_json_fwrite(void *__cookie, const char *buf, size_t size) {
-    cookie_t *cookie = __cookie;
+    json_t *cookie = __cookie;
     yajl_parse(cookie->writable.parser, (const unsigned char *)buf, size);
     return size;
 }
 
 static int cookie_json_fclose(void *__cookie) {
     int rc = 0;
-    cookie_t *cookie = (void *) __cookie;
+    json_t *cookie = (void *) __cookie;
     if (!cookie) {
         rc += 1;
     }
@@ -335,7 +410,7 @@ static int cookie_json_fclose(void *__cookie) {
 
 static ssize_t cookie_json_fread(void *__cookie, char *buf, size_t size)
 {
-    cookie_t *cookie = __cookie;
+    json_t *cookie = __cookie;
 
     if (size == 0) {
         return 0;
@@ -387,45 +462,96 @@ static ssize_t cookie_json_fread(void *__cookie, char *buf, size_t size)
 }
 
 
-const cookie_io_functions_t COOKIE_JSON = {
-    .write = cookie_json_fwrite,
-    .close = cookie_json_fclose,
-    .read  = cookie_json_fread,
-    .seek  = NULL,
+
+static void *json_init(void) {
+    struct json *jc = calloc(1, sizeof *jc);
+    if (!jc)
+        return NULL;
+
+    /* keys */
+    jc->writable.keys_cap = 256;
+    jc->writable.keys = calloc(jc->writable.keys_cap, sizeof(char *));
+    if (!jc->writable.keys)
+        goto fail;
+
+    /* queue */
+    jc->writable.queue = jc->readable.queue =
+        calloc(1, sizeof *jc->readable.queue);
+    if (!jc->readable.queue)
+        goto fail;
+
+    deque8_init(jc->readable.queue);
+
+    /* yajl parser */
+    jc->writable.parser =
+        yajl_alloc(&callbacks, NULL, &jc->writable);
+    if (!jc->writable.parser)
+        goto fail;
+
+    return jc;
+
+fail:
+    if (jc->writable.parser) yajl_free(jc->writable.parser);
+    if (jc->readable.queue) deque8_free(jc->readable.queue);
+    free(jc->writable.keys);
+    free(jc);
+    return NULL;
+}
+
+static void json_destroy(void *state) {
+    struct json *jc = state;
+    if (!jc)
+        return;
+
+    /* yajl */
+    if (jc->writable.parser)
+        yajl_free(jc->writable.parser);
+
+    /* keys */
+    if (jc->writable.keys) {
+        for (size_t i = 0; i < jc->writable.keys_size; i++)
+            free(jc->writable.keys[i]);
+        free(jc->writable.keys);
+    }
+
+    /* queue */
+    if (jc->readable.queue)
+        deque8_free(jc->readable.queue);
+
+    free(jc);
+}
+
+const cookie_t COOKIE_JSON = {
+    .ops = {
+        .write = cookie_json_fwrite,
+        .close = cookie_json_fclose,
+        .read  = cookie_json_fread,
+        .seek  = NULL,
+    },
+    .init = json_init,
+    .destroy = json_destroy
 };
 
-FILE *cookie(cookie_io_functions_t io) {
-    cookie_t *cookie = calloc(1, sizeof(cookie_t));
-    if (!cookie) {
-        return enomem(NULL);
-    }
-    cookie->writable.keys_cap = 256;
-    cookie->writable.keys = calloc(256, sizeof(char *));
-    if (!cookie->writable.keys) {
-        free(cookie);
-        return enomem(NULL);
+FILE *cookie(const struct cookie *backend)
+{
+    if (!backend || !backend->init)
+        return NULL;
+
+    void *state = backend->init();
+    if (!state)
+        return NULL;
+
+    FILE *f = fopencookie(state, "w+", backend->ops);
+    if (!f) {
+        /* fopencookie failed — backend state must be destroyed */
+        if (backend->destroy)
+            backend->destroy(state);
+        return NULL;
     }
 
-    deque8 *queue = calloc(1, sizeof(deque8));
-    if (!queue) {
-        free(cookie->writable.keys);
-        free(cookie);
-        return enomem(NULL);
-    }
-    deque8_init(queue);
-    cookie->readable.queue = cookie->writable.queue = queue;
-
-    cookie->writable.parser = yajl_alloc(&callbacks, NULL, (void *) &cookie->writable);
-    if (!cookie->writable.parser) {
-        deque8_free(queue);
-        free(cookie->writable.keys);
-        free(cookie);
-        return enomem(NULL);
-    }
-    
-
-    FILE *f = fopencookie(cookie, "w+", io);
+    /* Disable stdio buffering — backend controls buffering */
     setvbuf(f, NULL, _IONBF, 0);
+
     return f;
 }
 

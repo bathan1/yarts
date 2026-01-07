@@ -1,5 +1,5 @@
 /**
- * @file stream.h
+ * @file cookie.h
  * @brief In memory streams
  *
  * In memory stream that implements FIFO over a #deque
@@ -8,10 +8,7 @@
 #include <stdio.h>
 #include "cfns.h"
 
-/**
- * `fwrite()` on N bytes of data from SRC buffer to DST stream.
- */
-size_t fwrite8(const char *src, size_t n, FILE *dst);
+typedef struct cookie cookie_t;
 
 /**
  * Initialize a custom io stream with the provided callbacks in IO.
@@ -20,9 +17,14 @@ size_t fwrite8(const char *src, size_t n, FILE *dst);
  *
  * 내가 만든 쿠키
  */
-FILE *cookie(cookie_io_functions_t io);
+FILE *cookie(const struct cookie *backend);
 
 /**
  * JSON object list stream. It separates elements by newline '\n', so it's basically NDJSON.
  */
-extern const cookie_io_functions_t COOKIE_JSON;
+extern const struct cookie COOKIE_JSON;
+
+/**
+ * `fwrite()` on N bytes of data from SRC buffer to DST stream.
+ */
+size_t fwrite8(const char *src, size_t n, FILE *dst);

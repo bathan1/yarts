@@ -38,7 +38,7 @@ FILE *fetch(const char *url, const char *init[4]) {
     fs->reading_chunk_size = true;
     fs->chunk_line_len = 0;
 
-    fs->stream = cookie(COOKIE_JSON);
+    fs->stream = cookie(&COOKIE_JSON);
 
     fs->http_done = false;
 
