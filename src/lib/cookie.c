@@ -15,7 +15,7 @@
 struct cookie {
     const cookie_io_functions_t f;
 
-    void *(*init)(void *);          // allocate backend state
+    void *(*make)(void *);        // allocate backend state
     void  (*destroy)(void *);     // free backend state
 };
 
@@ -49,7 +49,7 @@ static int passthrough_close(void *c) {
     return 0;
 }
 
-static void *passthrough_init(void *_) {
+static void *passthrough_make(void *_) {
     struct passthrough *st = calloc(1, sizeof *st);
     if (!st)
         return NULL;
@@ -82,7 +82,7 @@ const struct cookie COOKIE_PASSTHROUGH = {
         .close = passthrough_close,
         .seek  = NULL,
     },
-    .init = passthrough_init,
+    .make = passthrough_make,
     .destroy = passthrough_destroy,
 };
 
@@ -474,7 +474,7 @@ static ssize_t json_fread(void *__cookie, char *buf, size_t size)
     return out;
 }
 
-static void *json_init(void *__path) {
+static void *json_make(void *__path) {
     struct json *jc = calloc(1, sizeof *jc);
     if (!jc)
         return NULL;
@@ -543,15 +543,15 @@ const struct cookie COOKIE_JSON = {
         .read  = json_fread,
         .seek  = NULL,
     },
-    .init = json_init,
+    .make = json_make,
     .destroy = json_destroy
 };
 
 FILE *cookie(const struct cookie *cfns, void *ctx) {
-    if (!cfns || !cfns->init)
+    if (!cfns || !cfns->make)
         return NULL;
 
-    void *state = cfns->init(ctx);
+    void *state = cfns->make(ctx);
     if (!state)
         return NULL;
 
