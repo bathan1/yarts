@@ -79,12 +79,17 @@ sqlite> SELECT * FROM todos WHERE url = 'https://jsonplaceholder.typicode.com/to
 └────┴───────────────────────────────────────────────────────────────────────┴───────────┘
 ```
 
-To query all completed todos:
+Here's how we can filter for completed todos only:
 
 ```sql
 SELECT * FROM todos WHERE url = 'https://jsonplaceholder.typicode.com/todos'
 AND completed = 'true' LIMIT 5;
 ```
+
+We have to set `completed` to a `TEXT` as opposed to a `BOOL`, because
+there is no `BOOL` in SQLite. The full notes on JSON type conversions
+can be found [here](./read-json), but basically just worry about the SQL types;
+VTTP will handle the type conversions into SQLite for you.
 
 ```sql
 sqlite> SELECT * FROM todos WHERE url = 'https://jsonplaceholder.typicode.com/todos'
@@ -100,7 +105,8 @@ sqlite> SELECT * FROM todos WHERE url = 'https://jsonplaceholder.typicode.com/to
 └────┴────────┴──────────────────────────────────────────────┴───────────┘
 ```
 
-If you only cared about the `id` and `title` fields, just include those columns in the schema:
+If you only cared about the `id` and `title` fields, simply omit the other fields from the `create virtual table`
+statement:
 
 ```sql
 DROP TABLE IF EXISTS todos;
@@ -158,12 +164,16 @@ CREATE VIRTUAL TABLE todos USING vttp (
 );
 ```
 
-This way, you don't need to set the `url` column in each
-query:
+This way, you don't need to set the `url` column for each query:
 
 ```sql
 SELECT * FROM todos LIMIT 5;
 ```
 
-In general, you *should* set a default URL if you know that you're
-only pinging 1 endpoint per `vttp` virtual table.
+For the most part, virtual tables created with VTTP can be queried as if they are plain SQL
+and (tries to) keeps the number of things you need to learn to use it to a minimum.
+
+:::important
+In general, you *should* set a default URL for `vttp` virtual tables 
+if you're only querying 1 endpoint for a `vttp` virtual table.
+:::

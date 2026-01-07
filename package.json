@@ -4,7 +4,8 @@
     "type": "module",
     "description": "An HTTP Virtual Table extension for SQLite",
     "scripts": {
-        "test": "vitest tests"
+      "test": "vitest tests",
+      "dev": "pnpm --filter=website run start"
     },
     "keywords": [],
     "author": "bathan1",

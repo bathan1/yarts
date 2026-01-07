@@ -26,50 +26,6 @@ SQLITE_EXTENSION_INIT1
 
 /* For debug logs */
 
-static void debug_print_json(const char *label, yyjson_val *val) {
-#ifndef NDEBUG
-    char *s = yyjson_val_write(val, YYJSON_WRITE_PRETTY_TWO_SPACES, NULL);
-    if (s) {
-        println("%s: %s", label, s);
-        free(s);
-    } else {
-        println("%s: <null or non-serializable>", label);
-    }
-#endif
-}
-
-typedef struct {
-    int status;
-    const char *text;
-} status_entry_t;
-
-// map status int -> status text
-static const status_entry_t STATUS_TABLE[] = {
-    {200, "OK"},
-    {201, "Created"},
-    {202, "Accepted"},
-    {204, "No Content"},
-    {301, "Moved Permanently"},
-    {302, "Found"},
-    {400, "Bad Request"},
-    {401, "Unauthorized"},
-    {403, "Forbidden"},
-    {404, "Not Found"},
-    {500, "Internal Server Error"},
-    {502, "Bad Gateway"},
-    {503, "Service Unavailable"},
-};
-#define STATUS_TABLE_LEN sizeof(STATUS_TABLE) / sizeof(STATUS_TABLE[0])
-
-// lookup status text from static `STATUS_TABLE` from a status code
-static const char *fetch_status_text(int status) {
-    for (size_t i = 0; i < STATUS_TABLE_LEN; ++i) {
-        if (STATUS_TABLE[i].status == status)
-            return STATUS_TABLE[i].text;
-    }
-    return "Unknown Status";
-}
-
 yyjson_doc *read_next_json_object(FILE *stream, char **errmsg) {
     char *buf = NULL;
     size_t cap = 0;
@@ -194,7 +150,8 @@ static Fetch *init_fetch_vtab(sqlite3 *db, int argc,
 
 static int xConnect(sqlite3 *pdb, void *paux, int argc,
                      const char *const *argv, sqlite3_vtab **pp_vtab,
-                     char **pz_err) {
+                     char **pz_err)
+{
     if (argc < MIN_ARGC) {
         fprintf(stderr, "Expected %d args but got %d args\n", MIN_ARGC, argc);
         return SQLITE_ERROR;

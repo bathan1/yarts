@@ -24,14 +24,42 @@ CREATE VIRTUAL TABLE patients USING vttp (
 );
 ```
 
-If we tried to run a `SELECT` against this...
+The JSON data in the payload contains 200 [Patient](https://hl7.org/fhir/R4/patient.html) objects in 
+an array that we want to query as rows. But if we tried to run a `SELECT` against this...
 
 ```sql
 SELECT * FROM patients LIMIT 5;
 ```
 
-We'll end up with 1 row (single object bodies are treated as a single row):
+We'll end up with 1 row because VTTP treats single object bodies are treated as an single-element list:
 
 ```sql
-
+sqlite> SELECT * FROM patients LIMIT 5;
+┌──────────────┬──────────────────────────────────────┬──────┐
+│ resourceType │                  id                  │ name │
+├──────────────┼──────────────────────────────────────┼──────┤
+│ Bundle       │ bccb2c06-2eb9-4589-aa3a-0aec1818f131 │      │
+└──────────────┴──────────────────────────────────────┴──────┘
 ```
+
+VTTP provides a way to get around this with the `body` hidden column.
+We can specify the *nested* value we want to turn into rows by setting
+the `url` column equal to a [JSONPath](https://en.wikipedia.org/wiki/JSONPath) string.
+
+For our `patients`, that value is `'$.entry[*].resource'`. So by setting `body` 
+equal to that like this:
+
+```sql {2}
+SELECT COUNT(*) as count, * FROM patients
+WHERE body = '$.entry[*].resource'
+LIMIT 5;
+```
+
+We will be able to view our patient rows:
+
+```sql
+sqlite> SELECT COUNT(*), * FROM patients
+        WHERE body = '$.entry[*].resource'
+        LIMIT 5;
+```
+
