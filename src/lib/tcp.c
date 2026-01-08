@@ -1,5 +1,4 @@
 #include "tcp.h"
-#include "cfns.h"
 
 #include <asm-generic/errno-base.h>
 #include <netdb.h>
@@ -20,21 +19,23 @@ static void err_print() {
 static int tls_connect(int sockfd, SSL **ssl,
                        SSL_CTX **ctx, const char *hostname);
 
-int ttcp_connect(int fd, struct sockaddr *addr, socklen_t len,
+int tcp_connect(int fd, struct sockaddr *addr, socklen_t len,
                  SSL **ssl, SSL_CTX **ctx, const char *hostname)
 {
     if (connect(fd, addr, len) < 0) {
-        return perror_rc(-1, "connect()", 0);
+        perror("connect()");
+        return -1;
     }
     if (ssl != NULL && ctx != NULL && hostname != NULL) {
         if (tls_connect(fd, ssl, ctx, hostname) < 0) {
-            return perror_rc(-1, "tls_connect()", 0);
+            perror("tls_connect()");
+            return -1;
         } // else { ok! }
     }
     return 0;
 }
 
-ssize_t ttcp_send(int fd, const char *bytes, size_t len, SSL *ssl) {
+ssize_t tcp_send(int fd, const char *bytes, size_t len, SSL *ssl) {
     if (fd < 0 && !ssl) {
         fprintf(
             stderr,
@@ -49,7 +50,7 @@ ssize_t ttcp_send(int fd, const char *bytes, size_t len, SSL *ssl) {
         return send(fd, bytes, len, 0);
 }
 
-ssize_t ttcp_recv(int sockfd, char *buf, size_t len, SSL *ssl) {
+ssize_t tcp_recv(int sockfd, char *buf, size_t len, SSL *ssl) {
     if (sockfd < 0 && ssl == NULL) {
         fprintf(
             stderr,
@@ -65,7 +66,7 @@ ssize_t ttcp_recv(int sockfd, char *buf, size_t len, SSL *ssl) {
         return recv(sockfd, buf, len, 0);
 }
 
-void ttcp_tls_free(SSL *ssl, SSL_CTX *ctx) {
+void tcp_tls_free(SSL *ssl, SSL_CTX *ctx) {
     if (ssl) {
         SSL_shutdown(ssl);
         SSL_free(ssl);

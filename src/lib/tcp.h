@@ -42,7 +42,7 @@ int tcp_connect(int fd, struct sockaddr * addr, socklen_t len,
  * @brief Send LEN BYTES over tcp connection at FD, potentially writing
  * over the TLS connection at SSL, if it exists.
  *
- * If SSL is `NULL`, then #ttcp_send() fallsback to plain \c send() call to SOCKFD.
+ * If SSL is `NULL`, then #tcp_send() fallsback to plain \c send() call to SOCKFD.
  *
  * @retval -1 ERROR - Neither the SOCKFD or SSL sockets can be written to.
  * @retval x>=0 OK - `x` bytes written out.
@@ -52,7 +52,7 @@ ssize_t tcp_send(int fd, const char *bytes, size_t len, SSL *ssl);
 /**
  * @brief Maybe recv LEN BYTES over the TCP connection at SSL, if it exists.
  *
- * If SSL is `NULL` then #ttcp_recv() fallsback to plain \c recv() call to SOCKFD.
+ * If SSL is `NULL` then #tcp_recv() fallsback to plain \c recv() call to SOCKFD.
  *
  * @retval -1 ERROR - Neither the SOCKFD or SSL sockets can be written to.
  * @retval (x >= 0) OK - X bytes written out.

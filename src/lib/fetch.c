@@ -76,10 +76,10 @@ int use_fetch(int fds[4], struct dispatch *dispatch) {
     SSL **ssl = is_tls ? &dispatch->ssl : NULL;
     SSL_CTX **ctx = is_tls ? &dispatch->ctx : NULL;
     const char *hostname = is_tls ? dispatch->url.hostname.hd : NULL;
-    if (ttcp_connect(
+    if (tcp_connect(
         dispatch->sockfd, dispatch->addrinfo->ai_addr, dispatch->addrinfo->ai_addrlen,
         ssl, ctx, hostname) < 0) {
-        return perror_rc(-1, "ttcp_connect()",
+        return perror_rc(-1, "tcp_connect()",
                          close(dispatch->sockfd),
                          dispatch_free(dispatch)
                          );
@@ -103,7 +103,7 @@ int use_fetch(int fds[4], struct dispatch *dispatch) {
         return perror_rc(-1, "dynamic()", close(dispatch->sockfd), dispatch_free(dispatch));
     }
 
-    if (ttcp_send(dispatch->sockfd, GET.hd, GET.length, is_tls ? *ssl : NULL) < 0) {
+    if (tcp_send(dispatch->sockfd, GET.hd, GET.length, is_tls ? *ssl : NULL) < 0) {
         return perror_rc(-1, "ttcp_send()", GET.hd, close(dispatch->sockfd), dispatch_free(dispatch));
     }
 
@@ -189,7 +189,7 @@ void *fetcher(void *arg) {
     fclose(fs->stream);
     fs->stream = NULL;
 
-    ttcp_tls_free(fs->ssl, fs->ssl_ctx);
+    tcp_tls_free(fs->ssl, fs->ssl_ctx);
 
     if (!fs->closed_outfd) {
         close(fs->outfd);
@@ -383,7 +383,7 @@ static bool handle_http_headers(struct fetch_state *st) {
     char buf[4096];
 
     for (;;) {
-        ssize_t n = ttcp_recv(st->netfd, buf, sizeof(buf), st->ssl);
+        ssize_t n = tcp_recv(st->netfd, buf, sizeof(buf), st->ssl);
         if (n > 0) {
             // Append to header buffer
             if (st->header_len + n > sizeof(st->header_buf)) {
@@ -446,7 +446,7 @@ static bool handle_http_headers(struct fetch_state *st) {
 static void handle_http_body(struct fetch_state *st) {
     char buf[4096];
 
-    ssize_t n = ttcp_recv(st->netfd, buf, sizeof(buf), st->ssl);
+    ssize_t n = tcp_recv(st->netfd, buf, sizeof(buf), st->ssl);
     if (n > 0) {
         // feed raw bytes to chunk/body parser
         handle_http_body_bytes(st, buf, (size_t)n);
