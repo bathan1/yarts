@@ -1,6 +1,7 @@
 #include "sql.h"
 #include <asm-generic/errno-base.h>
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,7 +28,7 @@ enum {
 
 enum { COL_URL = 0, COL_HEADERS, COL_BODY };
 
-static int resolve_column_index(struct string *tokens, size_t tokens_len, size_t current_index) {
+static int resolve_column_index(struct str *tokens, size_t tokens_len, size_t current_index) {
     bool is_url_column = (
         tokens_len > 0 &&
         tokens[TOK_NAME].length == 3 &&
@@ -38,13 +39,12 @@ static int resolve_column_index(struct string *tokens, size_t tokens_len, size_t
         if (tokens_len < 2 || tokens[TOK_TYPE].length != 4
             || strncmp(tokens[TOK_TYPE].hd, "text", 4) != 0)
         {
-            char *typename = uppercase_im(tokens[TOK_TYPE]).hd;
             fprintf(
                 stderr,
                 "Column \"url\" was expected to be type TEXT,"
                 " "
                 "not %s",
-                typename
+                map(tokens[TOK_TYPE], toupper).hd
             );
             return -1;
         }
@@ -80,171 +80,18 @@ static int hidden_column(int column_id, struct column_def **columns) {
             memcpy(hidden_column_name, "body", 4);
             break;
     }
-    columns[column_id]->name = ss(hidden_column_name, 3);
-    columns[column_id]->typename = ss(
-        strndup("text", 4),
-        3
-    );
+    columns[column_id]->name = str(hidden_column_name);
+    columns[column_id]->typename = str("text");
     return 0;
 }
 
-struct column_def **column_defs_from_declrs(int argc, const char *const *argv,
-                                          size_t *num_columns)
-{
-    struct column_def *columns[64 + 3] = {0};
-    // columns always has [URL, HEADERS, BODY] at start
-    size_t col_index = 3;
-
-    for (int i = FETCH_ARGS_OFFSET; i < argc; i++) {
-        bool is_url_column = false, has_default = false, has_generated_value = false;
-        // Each argument makes up 1 column declaration
-        const char *declaration = argv[i];
-        size_t tokens_size = 0;
-        struct string *tokens = splitch(
-            (struct string) {.hd=(char *) declaration, .length=strlen(declaration)},
-            ' ',
-            &tokens_size
-        );
-        if (!tokens || tokens_size < 1) {
-            return NULL;
-        }
-
-        // 0   1    2       3      4  5
-        // id int default   0
-        // id int generated always as ()
-        for (int i = 1; i < MIN(5, tokens_size); i++) {
-            if (tokens[i].hd[0] != '\'') {
-                if (lowercase(&tokens[i]) != 0) {
-                    for (int i = 0; i < tokens_size; i++) free(tokens[i].hd);
-                    free(tokens);
-                    return NULL;
-                }
-            }
-        }
-
-        const char *column_name = tokens[TOK_NAME].hd;
-        if (column_name[TOK_NAME] == '\"') {
-            if (column_name[tokens[TOK_NAME].length - 1] != '\"') {
-                fprintf(stderr, "Open dquote missing closing dquote in column name %s\n", column_name);
-                for (int t = 0; t < tokens_size; t++) free(tokens[t].hd);
-                free(tokens);
-                return NULL;
-            }
-            if (rmch(&tokens[TOK_NAME], '\"') != 0) {
-                for (int t = 0; t < tokens_size; t++) free(tokens[t].hd);
-                free(tokens);
-                return perror_rc(NULL, "rmch", 0);
-            }
-        }
-
-        if (tokens_size >= 3 &&
-            tokens[TOK_CST].length == 7 &&
-                strncmp(tokens[TOK_CST].hd, "default", 7) == 0)
-        {
-            if (tokens_size != 4) {
-                if (tokens_size < 4) {
-                    fprintf(stderr, "Default value missing for column %s\n", tokens[TOK_NAME].hd);
-                } else {
-                    fprintf(stderr, "Too many arguments for default value of column %s\n", tokens[TOK_NAME].hd);
-                }
-                for (int t = 0; t < tokens_size; t++) free(tokens[t].hd);
-                free(tokens);
-                return NULL;
-            }
-            has_default = true;
-        }
-
-        if (tokens_size >= 3 &&
-            tokens[TOK_CST].length == 9 &&
-            strncmp(tokens[TOK_CST].hd, "generated", 9) == 0
-            &&
-            tokens[TOK_CST_VAL].length == 6 &&
-            strncmp(tokens[TOK_CST_VAL].hd, "always", 6) == 0
-            &&
-            tokens[TOK_CST_VAL2].length == 2 &&
-            strncmp(tokens[TOK_CST_VAL2].hd, "as", 2) == 0
-            &&
-            tokens[TOK_CST_GEN_VAL].length > 0
-        ) {
-            has_generated_value = true;
-        }
-
-        int icol = resolve_column_index(tokens, tokens_size, i);
-        if (icol < 0) {
-            for (int t = 0; t < tokens_size; t++) free(tokens[t].hd);
-            free(tokens);
-            return NULL;
-        }
-
-        columns[icol] = calloc(1, sizeof(struct column_def));
-        if (!columns[icol]) {
-            for (int t = 0; t < tokens_size; t++) free(tokens[t].hd);
-            free(tokens);
-            return NULL;
-        }
-
-        columns[icol]->name = tokens[TOK_NAME];
-        columns[icol]->typename = tokens[TOK_TYPE];
-        if (has_default) {
-            if (rmch(&tokens[TOK_CST_VAL], '\'') != 0) {
-                for (int t = 0; t < tokens_size; t++) free(tokens[t].hd);
-                free(tokens);
-                return NULL;
-            }
-            columns[icol]->default_value = tokens[TOK_CST_VAL];
-        }
-        if (has_generated_value) {
-            char *expr_raw = tokens[TOK_CST_GEN_VAL].hd;
-            size_t expr_len = tokens[TOK_CST_GEN_VAL].length;
-            if (expr_len >= 2 && expr_raw[0] == '(' && expr_raw[expr_len - 1] == ')') {
-                expr_raw++;           // move start
-                expr_len -= 2;        // remove both '(' and ')'
-            }
-            struct string adjusted = {.hd=expr_raw, .length=expr_len};
-            struct string arrow_pattern = {.hd = "->", .length = 2};
-
-            size_t path_count = 0;
-            struct string *paths = split(adjusted, arrow_pattern, &path_count);
-            if (!paths) {
-                for (int t = 0; t < tokens_size; t++) free(tokens[t].hd);
-                free(tokens);
-                return NULL;
-            }
-
-            columns[icol]->generated_always_as = paths;
-            columns[icol]->generated_always_as_len = path_count;
-        }
-
-        // if we're at url, then we wrote to index 0, so we DON'T increment index counter
-        col_index = icol < i ? col_index : col_index + 1;
-    }
-
-    if (hidden_column(COL_URL, columns) != 0
-        || hidden_column(COL_HEADERS, columns) != 0
-        || hidden_column(COL_BODY, columns) != 0)
-    {
-        if (errno != EEXIST) {
-            return NULL;
-        }
-        // else the hidden column was explicitly user defined
-    }
-
-    struct column_def **heap_columns =
-        calloc(col_index, sizeof(struct column_def *));
-    if (!heap_columns) return NULL;
-
-    memcpy(heap_columns, columns,
-        col_index * sizeof(struct column_def *));
-
-    if (num_columns) *num_columns = col_index;
-
-    return heap_columns;
-}
+static bool isnotdquo(int c, uint _i) {return c != '\"';}
+static bool isnotsquo(int c, uint _i) {return c != '\'';}
 
 /**
  * Do the given NUM_TOKENS TOKENS have a `GENERATED ALWAYS AS` clause in it?.
  */
-static bool is_with_generated_always_as(struct string *tokens, size_t num_tokens) {
+static bool is_with_generated_always_as(struct str *tokens, size_t num_tokens) {
     if (num_tokens < 6) {
         return false;
     }
@@ -254,9 +101,9 @@ static bool is_with_generated_always_as(struct string *tokens, size_t num_tokens
     {
         return false;
     }
-    struct string generated_token = to_lowercase(tokens[TOK_CST]);
-    struct string always_token = to_lowercase(tokens[TOK_CST_VAL]);
-    struct string as_token = to_lowercase(tokens[TOK_CST_VAL2]);
+    struct str generated_token = map(tokens[TOK_CST], tolower);
+    struct str always_token = map(tokens[TOK_CST_VAL], tolower);
+    struct str as_token = map(tokens[TOK_CST_VAL2], tolower);
     bool has_generated_always_as = (
         strncmp(generated_token.hd, "generated", 9) == 0
         &&
@@ -267,9 +114,6 @@ static bool is_with_generated_always_as(struct string *tokens, size_t num_tokens
         tokens[TOK_CST_GEN_VAL].length > 0
     );
 
-    free(generated_token.hd);
-    free(always_token.hd);
-    free(as_token.hd);
     return has_generated_always_as;
 }
 
@@ -281,37 +125,30 @@ struct column_def *resolve_hidden_columns(int argc, const char *const *argv) {
     struct column_def *cols = calloc(MAX_COL_COUNT, sizeof(struct column_def));
     // static declarations
     cols[0] = (struct column_def) {
-        .name = ss("url", 4),
-        .typename = ss("text", 4),
-        .default_value = ss("", 0),
+        .name = str("url"),
+        .typename = str("text"),
+        .default_value = str(""),
         .generated_always_as = NULL,
         .generated_always_as_len = 0
     };
     cols[1] = (struct column_def) {
-        .name = ss("headers", 7),
-        .typename = ss("text", 4),
-        .default_value = ss("", 0),
+        .name = str("headers"),
+        .typename = str("text"),
+        .default_value = str(""),
         .generated_always_as = NULL,
         .generated_always_as_len = 0
     };
     cols[2] = (struct column_def) {
-        .name = ss("body", 7),
-        .typename = ss("text", 4),
-        .default_value = ss("", 0),
+        .name = str("body"),
+        .typename = str("text"),
+        .default_value = str("", 0),
         .generated_always_as = NULL,
         .generated_always_as_len = 0
     };
 
     for (int i = FETCH_ARGS_OFFSET; i < argc; i++) {
         size_t num_tokens = 0;
-        struct string *tokens = splitch(
-            (struct string) {
-                .hd=(char *) argv[i],
-                .length = strlen(argv[i])
-            },
-            ' ',
-            &num_tokens
-        );
+        struct str *tokens = split(str(argv[i]), STR(" "), &num_tokens);
 
         // handle a default url value
         if (tokens[0].length == 3 
@@ -319,11 +156,8 @@ struct column_def *resolve_hidden_columns(int argc, const char *const *argv) {
             && num_tokens == 4
             /* (url, 1), (text, 2), (default, 3), ('some-url', 4) is 4 tokens */
         ) {
-            rmch(&tokens[3], '\'');
-            cols[0].default_value = ss(
-                tokens[3].hd,
-                tokens[3].length
-            );
+            tokens[3] = filter(tokens[3], isnotsquo);
+            cols[0].default_value = str(tokens[3].hd);
         }
 
     }
@@ -335,7 +169,7 @@ struct column_def *resolve_hidden_columns(int argc, const char *const *argv) {
  * Returns whether or not COLNAME matches that of the hidden columns always included
  * in a fetch table.
  */
-static bool is_hidden_column(struct string colname) {
+static bool is_hidden_column(struct str colname) {
     if (colname.length + 1 != (sizeof("url"))
         && colname.length + 1 != sizeof("headers")
         && colname.length + 1 != sizeof("body")
@@ -356,17 +190,13 @@ static bool is_hidden_column(struct string colname) {
  * an error message with the original argument LINE_RAW in context if there is no
  * corresponding trailing dquote.
  */
-static int strip_colname_dquotes(struct string *tokens, const char *line_raw) {
+static int strip_colname_dquotes(struct str *tokens, const char *line_raw) {
     if (tokens[TOK_NAME].hd[tokens[TOK_NAME].length - 1] != '\"') {
         fprintf(stderr, "Open dquote line is missing closing dquote: %s\n", line_raw);
         free(tokens);
         return 1;
     }
-    if (rmch(&tokens[TOK_NAME], '\"') != 0) {
-        fprintf(stderr, "Can't strip dquotes from a null string");
-        free(tokens);
-        return 1;
-    }
+    tokens[TOK_NAME] = filter(tokens[TOK_NAME], isnotdquo);
     return 0;
 }
 
@@ -378,25 +208,17 @@ struct column_def *parse_column_defs(int argc, const char *const *argv,
     size_t n_columns = 3;
     for (int i = FETCH_ARGS_OFFSET; i < argc; i++) {
         size_t num_tokens = 0;
-        struct string *tokens = splitch(
-            (struct string) {
-                .hd = (char *) argv[i],
-                .length = strlen(argv[i])
-            },
-            ' ',
-            &num_tokens
-        );
+        struct str *tokens = split(str(argv[i]), STR(" "), &num_tokens);
 
         if (is_hidden_column(tokens[TOK_NAME])) {
             continue; // we already handle this in resolve_hidden_columns()
         }
 
         if (tokens[TOK_NAME].hd[0] == '\"') {
-            if (strip_colname_dquotes(tokens, argv[i]) != 0) {
+            if (strip_colname_dquotes(tokens, argv[i]) != 0)
                 return NULL;
-            }
         } else {
-            lowercase(&tokens[TOK_NAME]); // treat it as case-insensitive if no dquotes
+            map(tokens[TOK_NAME], tolower);
         }
 
         // 5 tokens: id int generated always as (...)
@@ -408,24 +230,19 @@ struct column_def *parse_column_defs(int argc, const char *const *argv,
                 expr_len -= 2;        // remove both '(' and ')'
                 expr_raw[expr_len] = 0;
             }
-            struct string adjusted = {.hd=expr_raw, .length=expr_len};
-            struct string arrow_pattern = {.hd = "->", .length = 2};
+            struct str adjusted = {.hd=expr_raw, .length=expr_len};
+            struct str arrow_pattern = {.hd = "->", .length = 2};
 
-            size_t path_count = 0;
-            struct string *paths = split(adjusted, arrow_pattern, &path_count);
-            if (!paths) {
-                free(tokens);
-                return NULL;
-            }
+            size_t npaths = 0;
+            struct str *paths = split(adjusted, arrow_pattern, &npaths);
 
-            for (int i = 0; i < path_count; i++) {
-                if (paths[i].length > 0 && paths[i].hd[0] == '\'') {
-                    rmch(&paths[i], '\'');
-                }
+            for (int i = 0; i < npaths; i++) {
+                if (paths[i].length > 0 && paths[i].hd[0] == '\'')
+                    paths[i] = filter(paths[i], isnotsquo);
             }
 
             cols[n_columns].generated_always_as = paths;
-            cols[n_columns].generated_always_as_len = path_count;
+            cols[n_columns].generated_always_as_len = npaths;
         }
 
 

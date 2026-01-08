@@ -112,7 +112,7 @@ static Fetch *init_fetch_vtab(sqlite3 *db, int argc,
     vtab->column_defs = parse_column_defs(argc, argv, &vtab->column_defs_count);
 
     /* max number of tokens valid inside a single xCreate argument for the table declaration */
-    struct string first_line = dynamic("create table %s(", argv[2]);
+    struct str first_line = str("create table %s(", argv[2]);
     sqlite3_str *s = sqlite3_str_new(db);
     sqlite3_str_appendall(s, first_line.hd);
 
@@ -257,6 +257,11 @@ static int xBestIndex(sqlite3_vtab *pVTab, sqlite3_index_info *pIdxInfo) {
 static int xDisconnect(sqlite3_vtab *pvtab) {
     Fetch *vtab = (Fetch *) pvtab;
 
+    for (uint i = 3; i < vtab->column_defs_count; i++) {
+        done(vtab->column_defs[i].default_value);
+        done(vtab->column_defs[i].name);
+        done(vtab->column_defs[i].typename);
+    }
     free(vtab->column_defs);
     vtab->column_defs = 0;
     vtab->column_defs_count = 0;
@@ -332,18 +337,20 @@ static void json_bool_result(
 
 static yyjson_val *follow_generated_path(
     yyjson_val *root,
-    struct string *keys,
+    struct str *keys,
     size_t count
 ) {
+    if (count == 0)
+        return NULL;
     yyjson_val *cur = root;
 
     for (size_t i = 0; i < count; i++) {
-        if (!cur || yyjson_get_type(cur) != YYJSON_TYPE_OBJ) {
+        if (!cur || yyjson_get_type(cur) != YYJSON_TYPE_OBJ)
             return NULL;
-        }
 
         /* Pass exact byte count to yyjson */
         cur = yyjson_obj_getn(cur, keys[i].hd, keys[i].length);
+        char *json = yyjson_val_write(cur, YYJSON_WRITE_PRETTY, NULL);
     }
 
     return cur;
@@ -368,7 +375,11 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
     }
 
     struct column_def def = vtab->column_defs[icol];
+
     yyjson_val *val = yyjson_doc_get_root(cursor->next_doc);
+
+    char *json = yyjson_val_write(val, YYJSON_WRITE_PRETTY, NULL);
+    printf("column name: %s %zu\n", def.name.hd, def.name.length);
 
     if (def.generated_always_as_len > 0) {
         val = follow_generated_path(
@@ -376,12 +387,11 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
             def.generated_always_as,
             def.generated_always_as_len
         );
-
     } else {
         val = yyjson_obj_getn(val, def.name.hd, def.name.length);
     }
 
-    char *json = yyjson_val_write(val, YYJSON_WRITE_PRETTY, NULL);
+
     if (!val) {
         sqlite3_result_null(pctx);
         return SQLITE_OK;

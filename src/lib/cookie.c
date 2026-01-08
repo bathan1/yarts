@@ -27,7 +27,7 @@ static ssize_t passthrough_write(void *c, const char *buf, size_t n) {
     struct passthrough *st = c;
     char *copy = malloc(n);
     memcpy(copy, buf, n);
-    struct str copy_str = {.val=copy, .length=n};
+    struct str copy_str = {.hd=copy, .length=n};
     insert(st->queue, copy_str);
     return n;
 }
@@ -35,11 +35,11 @@ static ssize_t passthrough_write(void *c, const char *buf, size_t n) {
 static ssize_t passthrough_read(void *c, char *buf, size_t n) {
     struct passthrough *st = c;
     struct str front = next(st->queue);
-    if (!front.val)
+    if (!front.hd)
         return 0;
     size_t out = len(front) < n ? len(front) : n;
-    memcpy(buf, front.val, out);
-    free(front.val);
+    memcpy(buf, front.hd, out);
+    free(front.hd);
     return out;
 }
 
@@ -89,8 +89,8 @@ const struct cookie COOKIE_PASSTHROUGH = {
 
 struct json_writable {
     yajl_handle parser;
-    list *path;
-    list *path_parent;
+    struct list *path;
+    struct list *path_parent;
     unsigned int current_depth;
     struct queue *queue;
 
@@ -265,7 +265,7 @@ static int handle_map_key(void *ctx,
     char *next_key = strndup((const char *) str, length);
     if (cur->path 
         && length == get(cur->path).length
-        && strncmp(next_key, get(cur->path).val, length) == 0)
+        && strncmp(next_key, get(cur->path).hd, length) == 0)
     {
         if (next(cur->path) == NULL && cur->path_parent == NULL) {
             // this will only run once since path_parent is the same for every row
@@ -317,7 +317,7 @@ static int handle_end_map(void *ctx) {
         cur->keys_size = 0;
 
         char *json = yyjson_write(final, cur->pp_flags, NULL);
-        struct str json_str = {.val=json,.length=strlen(json)};
+        struct str json_str = {.hd=json,.length=strlen(json)};
         // we push to queue
         insert(cur->queue, json_str);
 
@@ -444,9 +444,9 @@ static ssize_t json_fread(void *__cookie, char *buf, size_t size)
         /* Load next JSON object if needed */
         if (!cookie->readable.current) {
             struct str front = next(cookie->readable.queue);
-            if (!front.val)
+            if (!front.hd)
                 return out;
-            cookie->readable.current = front.val;
+            cookie->readable.current = front.hd;
 
             cookie->readable.length = len(front);
             cookie->readable.offset = 0;

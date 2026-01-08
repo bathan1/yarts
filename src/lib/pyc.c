@@ -1,9 +1,20 @@
 #include "pyc.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+
+int min(int a, int b) {
+    return a < b ? a : b;
+}
+
+int max(int a, int b) {
+    return a > b ? a : b;
+}
 
 const struct str STR_EMPTY = {
-    .val = NULL,
+    .hd = NULL,
     .length = 0
 };
 
@@ -20,16 +31,49 @@ struct queue {
     size_t cap;
 };
 
+struct str str(const char *fmt, ...) {
+    struct str out = {0};
+    va_list ap, ap2;
+
+    // --- First pass: measure ---
+    va_start(ap, fmt);
+    va_copy(ap2, ap);
+
+    int needed = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+
+    if (needed < 0) {
+        errno = EINVAL;
+        va_end(ap2);
+        return out;
+    }
+
+    size_t len = (size_t)needed;
+    char *p = (char *) calloc(1, len + 1);
+    if (!p) {
+        va_end(ap2);
+        return out;
+    }
+
+    vsnprintf(p, len + 1, fmt, ap2);
+    va_end(ap2);
+
+    return (struct str) {
+        .hd = p,
+        .length = len
+    };
+}
+
 struct str __str_next(struct str s) {
-    if (s.length == 0 || s.val[0] == '\0') {
+    if (s.length == 0 || s.hd[0] == '\0') {
         return (struct str) {
-            .val = "",
+            .hd = "",
             .length = 0
         };
     }
 
     return (struct str) {
-        .val = s.val + 1,
+        .hd = s.hd + 1,
         .length = s.length - 1 
     };
 }
@@ -39,28 +83,149 @@ size_t __str_len(struct str s) {
 }
 
 const char *__str_get(struct str s) {
-    return s.val;
+    return s.hd;
 }
 
 bool __str_done(struct str s) {
     int rc = 0;
-    if (s.val) {
-        free(s.val);
+    if (s.hd) {
+        free(s.hd);
         rc += 1;
     }
     s.length = 0;
     return rc;
 }
 
+struct str __str_filter(struct str s, bool f (int c, uint i)) {
+    if (!s.hd)
+        return empty(struct str);
+
+    uint p = 0;
+    for (uint i = 0; i < s.length; i++) {
+        if (f(s.hd[i], i))
+            s.hd[p++] = s.hd[i];
+    }
+    s.hd[p] = '\0';
+    s.length = p;
+
+    return s;
+}
+
 bool __str_insert(struct str s, char ch) {
-    if (!s.val) {
+    if (!s.hd) {
         return false;
     }
 
-    s.val[s.length] = ch;
-    s.val[s.length + 1] = '\0';
+    s.hd[s.length] = ch;
+    s.hd[s.length + 1] = '\0';
     s.length += 1;
     return true;
+}
+
+struct str __str_map(struct str s, int f (int)) {
+    if (!s.hd) {
+        return empty(struct str);
+    }
+    struct str st = {
+        .hd = s.hd,
+        .length = s.length
+    };
+    for (uint i = 0; i < s.length; i++)
+        st.hd[i] = f(s.hd[i]);
+    return st;
+}
+
+struct str *__str_split(struct str s, struct str m, size_t *n) {
+    if (!s.hd || !m.hd || !n) {
+        return NULL;
+    };
+    *n = 0;
+
+    const char *src = s.hd;
+    size_t slen = s.length;
+
+    const char *pat = m.hd;
+    size_t plen = m.length;
+
+    // Edge case: empty pattern -> return whole string as 1 token
+    if (plen == 0) {
+        struct str *arr = calloc(1, sizeof(*arr));
+        if (!arr) return NULL;
+        arr[0] = str(s.hd);
+        *n = 1;
+        return arr;
+    }
+
+    size_t count = 1;
+    for (size_t i = 0; i + plen <= slen; ) {
+        if (memcmp(src + i, pat, plen) == 0) {
+            count++;
+            i += plen;
+        } else {
+            i++;
+        }
+    }
+
+    // token array
+    struct str *parts = calloc(count, sizeof(*parts));
+    if (!parts) return NULL;
+
+    size_t idx = 0;
+    size_t start = 0;
+
+    for (size_t i = 0; i <= slen; ) {
+
+        bool at_end = (i == slen);
+        bool at_pat = false;
+
+        if (!at_end && i + plen <= slen)
+            at_pat = (memcmp(src + i, pat, plen) == 0);
+
+        if (at_pat || at_end) {
+
+            // token = substring [start, i)
+            struct str token = __str_slice(s, start, i);
+
+            if (!token.hd) {
+                // cleanup all previous tokens
+                for (size_t k = 0; k < idx; k++)
+                    free(parts[k].hd);
+                free(parts);
+                *n = 0;
+                return NULL;
+            }
+
+            parts[idx++] = token;
+
+            if (at_pat) {
+                i += plen;
+                start = i;
+                continue;
+            }
+
+            if (at_end)
+                break;
+        }
+
+        i++;
+    }
+
+    *n = count;
+    return parts;
+}
+
+struct str __str_slice(const struct str s, uint start, uint end) {
+    if (!s.hd || start > end || end > s.length) {
+        return empty(struct str);
+    }
+    size_t len = end - start;
+    char *buf = malloc(len + 1);
+    if (!buf)
+        return empty(struct str);
+
+    memcpy(buf, s.hd + start, len);
+    buf[len] = '\0';
+    return (struct str) {.hd=buf, .length=len};
 }
 
 struct list *__list_next(struct list *ls) {
@@ -92,49 +257,43 @@ size_t __list_len(struct list *ls) {
 
 struct str __list_get(struct list *ls) {
     if (!ls) {
-        return empty(str);
+        return empty(struct str);
     }
     return ls->val;
 }
 
 bool __list_done(struct list *ls) {
-    int rc = 0;
     if (!ls) {
-        return rc;
+        return false;
     }
 
     struct list *next_node = ls->next;
     struct list *prev_node = ls->prev;
 
     free(ls);
-    rc += 1;
 
     while (next_node) {
         struct list *next_next = next_node->next;
         free(next_node);
-        rc += 1;
         next_node = next_next;
     }
 
     while (prev_node) {
         struct list *prev_prev = prev_node->prev;
         free(prev_node);
-        rc += 1;
         prev_node = prev_prev;
     }
 
-    return rc;
+    return true;
 }
 
 bool __list_insert(struct list *ls, struct str s) {
-    if (!ls || !s.val) {
+    if (!ls || !s.hd)
         return false;
-    }
 
     struct list *cur_tl = ls;
-    while (cur_tl->next) {
+    while (cur_tl->next)
         cur_tl = cur_tl->next;
-    }
 
     struct list *new_tl = calloc(1, sizeof(struct list));
 
@@ -144,9 +303,61 @@ bool __list_insert(struct list *ls, struct str s) {
     return true;
 }
 
+struct list *__list_filter(struct list **ls, bool f (struct str s, uint i)) {
+    if (!ls || !*ls || !f)
+        return NULL;
+
+    /* Find true head of input list */
+    struct list *cur = *ls;
+    while (cur->prev)
+        cur = cur->prev;
+
+    struct list *keep_head = NULL;
+    struct list *keep_tail = NULL;
+    struct list *rej_head  = NULL;
+    struct list *rej_tail  = NULL;
+
+    uint index = 0;
+
+    while (cur) {
+        struct list *next = cur->next;  // save traversal
+
+        /* detach node completely */
+        cur->prev = NULL;
+        cur->next = NULL;
+
+        if (f(cur->val, index++)) {
+            /* append to kept list */
+            if (!keep_head) {
+                keep_head = keep_tail = cur;
+            } else {
+                keep_tail->next = cur;
+                cur->prev = keep_tail;
+                keep_tail = cur;
+            }
+        } else {
+            /* append to rejected list */
+            if (!rej_head) {
+                rej_head = rej_tail = cur;
+            } else {
+                rej_tail->next = cur;
+                cur->prev = rej_tail;
+                rej_tail = cur;
+            }
+        }
+
+        cur = next;
+    }
+
+    /* write rejected list head back to caller */
+    *ls = rej_head;
+
+    return keep_head;
+}
+
 struct str __queue_next(struct queue *q) {
     if (!q || q->size == 0) {
-        return empty(str);
+        return empty(struct str);
     }
 
     struct str popped = q->buffer[q->hd]; // pop
@@ -189,7 +400,7 @@ bool __queue_done(struct queue *q) {
 
 #define QUEUE_INIT_SIZE 8
 bool __queue_insert(struct queue *q, struct str s) {
-    if (!q || !s.val) {
+    if (!q || !s.hd) {
         return false;
     }
     if (!q->buffer) {
@@ -229,29 +440,4 @@ bool __queue_insert(struct queue *q, struct str s) {
     return true;
 }
 #undef QUEUE_INIT_SIZE
-
-int main() {
-    struct str fst = {.val="hello", .length=sizeof("hello") - 1};
-    struct str sec = {.val=" ", .length=sizeof(" ") - 1};
-    struct str lst = {.val="world!\n", .length=sizeof("world!\n") - 1};
-
-    struct queue q = {
-        .cap = 8,
-        .buffer = calloc(8, sizeof(struct str)),
-        .hd = 0,
-        .size = 0
-    };
-
-    insert(&q, fst);
-    insert(&q, sec);
-    insert(&q, lst);
-
-    while (len(&q) > 0) {
-        get(&q);
-        struct str popped = next(&q);
-        printf("%s", popped.val);
-    }
-
-    return 0;
-}
 

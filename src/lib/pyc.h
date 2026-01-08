@@ -3,18 +3,38 @@
  * @brief A python-inspired API for general C scripts.
  */
 #pragma once
-#include <stddef.h>
 #include <stdbool.h>
+#include <stdlib.h>
+
+/**
+ * @brief Get min of A, B, ...
+ */
+int min(int a, int b);
+
+/**
+ * @brief max function
+ */
+int max(int a, int b);
 
 /* STRING */
 
 /**
  * @brief Buffer pointer + length
  */
-typedef struct str {
-    char *val;
+struct str {
+    char *hd;
     size_t length;
-} str;
+};
+
+/**
+ * @brief Static string declaration convenience
+ */
+#define STR(__s) ((struct str) {.hd=__s, .length=sizeof(__s) - 1})
+
+/**
+ * @brief Malloc a char buffer from the format string FMT and wrap it in the returned #str.
+ */
+struct str str(const char *fmt, ...);
 
 /**
  * Canonical empty string view. Safe to use everywhere.
@@ -35,7 +55,7 @@ struct str __str_next(struct str s);
 size_t __str_len(struct str s);
 
 /**
- * @brief Get the pointer to the backing byte buffer in S.
+ * @brief Get the pointer to the backing byte buffer in S. This is optional for callers because you can just access s.val directly.
  */
 const char *__str_get(struct str s);
 
@@ -49,12 +69,34 @@ bool __str_done(struct str s);
  */
 bool __str_insert(struct str s, char ch);
 
+/**
+ * @brief For each char C at index I in S, include C in the returned S if F(C, I) = true
+ */
+struct str __str_filter(struct str s, bool f (int c, uint i));
+
+/**
+ * @brief Map each char C in S to new char F(C).
+ */
+struct str __str_map(struct str s, int f (int c));
+
+/**
+ * @brief Split S against matches of M into N elements.
+ */
+struct str *__str_split(struct str s, struct str m, size_t *n);
+
+/**
+ * @brief Get back S[START:END] (end is exclusive index)
+ */
+struct str __str_slice(const struct str s, uint start, uint end);
+
+char *__str_to_string(const struct str s);
+
 /* LIST */
 
 /**
  * @brief Doubly linked list
  */
-typedef struct list list;
+struct list;
 
 /**
  * @brief Get the next node in the list in LS, if it exists.
@@ -72,7 +114,9 @@ size_t __list_len(struct list *ls);
 struct str __list_get(struct list *ls);
 
 /**
- * @brief Cleanup *dynamically* allocated list LS.
+ * @brief Cleanup *dynamically* allocated list LS. 
+ *        This does NOT free the #str buffers from the nodes,
+ *        so YOU are in charge of freeing those.
  */
 bool __list_done(struct list *ls);
 
@@ -81,12 +125,22 @@ bool __list_done(struct list *ls);
  */
 bool __list_insert(struct list *ls, struct str s);
 
+/**
+ * @brief Returns the filtered list head for all nodes that pass F
+ *        and writes out the head of the reject list to LS.
+ *
+ * We maintain a reject list so the caller can be in charge of the reject
+ * list's memory. So this is really a partition, but that's a memory-concern 
+ * and not meant to be the interface (though you could certainly use it like so).
+ */
+struct list *__list_filter(struct list **ls, bool f (struct str s, uint i));
+
 /* QUEUE */
 
 /**
  * @brief FIFO over char buffers.
  */
-typedef struct queue queue;
+struct queue;
 
 /**
  * @brief Pops the front string of Q.
@@ -172,3 +226,29 @@ bool __queue_insert(struct queue *q, struct str s);
         struct list *: __list_insert, \
         struct queue *: __queue_insert \
     )((iter), (value))
+
+/**
+ * @brief Filter out all elements in ITER that don't pass F.
+ */
+#define filter(iter, f) \
+    _Generic((iter), \
+        struct str: __str_filter, \
+        struct list **: __list_filter \
+    )((iter), (f))
+
+/**
+ * @brief F(x) for x in ITER. Memory semantics specific to each struct.
+ */
+#define map(iter, f) \
+    _Generic((iter), \
+        struct str: __str_map \
+    )((iter), (f))
+
+/**
+ * @brief Reduce INIT with each x in ITER in the callback F
+ */
+#define split(iter, match, f) \
+    _Generic((iter), \
+        struct str: __str_split \
+    )((iter), (match), (f))
+

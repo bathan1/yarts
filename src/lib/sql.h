@@ -5,14 +5,14 @@
 
 #pragma once
 
-#include "cfns.h"
+#include "pyc.h"
 
 struct column_def {
-    struct string name;
-    struct string typename;
-    struct string default_value;
+    struct str name;
+    struct str typename;
+    struct str default_value;
 
-    struct string *generated_always_as;
+    struct str *generated_always_as;
     size_t generated_always_as_len;
 };
 
