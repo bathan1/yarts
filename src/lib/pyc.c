@@ -187,9 +187,16 @@ bool __queue_done(struct queue *q) {
     return rc;
 }
 
+#define QUEUE_INIT_SIZE 8
 bool __queue_insert(struct queue *q, struct str s) {
     if (!q || !s.val) {
         return false;
+    }
+    if (!q->buffer) {
+        // then we need to initialize the buffer
+        q->buffer = calloc(QUEUE_INIT_SIZE, sizeof(struct str));
+        q->cap = QUEUE_INIT_SIZE;
+        q->size = 0;
     }
 
     /* Grow buffer if full */
@@ -221,6 +228,7 @@ bool __queue_insert(struct queue *q, struct str s) {
 
     return true;
 }
+#undef QUEUE_INIT_SIZE
 
 int main() {
     struct str fst = {.val="hello", .length=sizeof("hello") - 1};

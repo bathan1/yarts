@@ -111,7 +111,10 @@ int use_fetch(int fds[4], struct dispatch *dispatch) {
 
     int sv[2] = {0};
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
-        return perror_rc(-1, "socketpair()", close(dispatch->sockfd), dispatch_free(dispatch));
+        fprintf(stderr, "couldn't open socketpair for url: %s\n", dispatch->url.hostname.hd);
+        close(dispatch->sockfd);
+        dispatch_free(dispatch);
+        return -1;
     }
     int appfd = sv[0];
     int fetchfd = sv[1];

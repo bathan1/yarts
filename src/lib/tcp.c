@@ -36,26 +36,33 @@ int ttcp_connect(int fd, struct sockaddr *addr, socklen_t len,
 
 ssize_t ttcp_send(int fd, const char *bytes, size_t len, SSL *ssl) {
     if (fd < 0 && !ssl) {
+        fprintf(
+            stderr,
+            "[tcp_send] FD can't be < 0 when SSL is NULL: %d\n",
+            fd
+        );
         return -1;
     }
-    if (ssl) {
+    if (ssl)
         return SSL_write(ssl, bytes, len);
-    } else {
+    else
         return send(fd, bytes, len, 0);
-    }
 }
 
 ssize_t ttcp_recv(int sockfd, char *buf, size_t len, SSL *ssl) {
-    if (sockfd < 0 && !ssl) {
-        // nothing to write to!
+    if (sockfd < 0 && ssl == NULL) {
+        fprintf(
+            stderr,
+            "[tcp_recv] SOCKFD can't be less than 0 when SSL is NULL: %d\n",
+            sockfd
+        );
         return -1;
     }
 
-    if (ssl) {
+    if (ssl)
         return SSL_read(ssl, buf, len);
-    } else {
+    else
         return recv(sockfd, buf, len, 0);
-    }
 }
 
 void ttcp_tls_free(SSL *ssl, SSL_CTX *ctx) {

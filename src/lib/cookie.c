@@ -20,31 +20,33 @@ struct cookie {
 };
 
 struct passthrough {
-    struct deque8 *queue;
+    struct queue *queue;
 };
 
 static ssize_t passthrough_write(void *c, const char *buf, size_t n) {
     struct passthrough *st = c;
     char *copy = malloc(n);
     memcpy(copy, buf, n);
-    deque8_push(st->queue, copy);
+    struct str copy_str = {.val=copy, .length=n};
+    insert(st->queue, copy_str);
     return n;
 }
 
 static ssize_t passthrough_read(void *c, char *buf, size_t n) {
     struct passthrough *st = c;
-    char *cur = deque8_pop(st->queue);
-    if (!cur) return 0;
-    size_t len = strlen(cur);
-    size_t out = len < n ? len : n;
-    memcpy(buf, cur, out);
-    free(cur);
+    struct str front = next(st->queue);
+    if (!front.val)
+        return 0;
+    size_t out = len(front) < n ? len(front) : n;
+    memcpy(buf, front.val, out);
+    free(front.val);
     return out;
 }
 
 static int passthrough_close(void *c) {
     struct passthrough *st = c;
-    deque8_free(st->queue);
+    if (st->queue)
+        done(st->queue);
     free(st);
     return 0;
 }
@@ -54,13 +56,12 @@ static void *passthrough_make(void *_) {
     if (!st)
         return NULL;
 
-    st->queue = calloc(1, sizeof *st->queue);
+    st->queue = calloc(1, sizeof(struct queue *));
     if (!st->queue) {
         free(st);
         return NULL;
     }
 
-    deque8_init(st->queue);
     return st;
 }
 
@@ -70,7 +71,7 @@ static void passthrough_destroy(void *state) {
         return;
 
     if (st->queue)
-        deque8_free(st->queue);
+        done(st->queue);
 
     free(st);
 }
