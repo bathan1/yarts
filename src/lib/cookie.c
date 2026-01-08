@@ -27,7 +27,7 @@ static ssize_t passthrough_write(void *c, const char *buf, size_t n) {
     struct passthrough *st = c;
     char *copy = malloc(n);
     memcpy(copy, buf, n);
-    struct str copy_str = {.hd=copy, .length=n};
+    struct str copy_str = strn(copy, n);
     insert(st->queue, copy_str);
     return n;
 }
@@ -264,8 +264,8 @@ static int handle_map_key(void *ctx,
     struct json_writable *cur = ctx;
     char *next_key = strndup((const char *) str, length);
     if (cur->path 
-        && length == get(cur->path).length
-        && strncmp(next_key, get(cur->path).hd, length) == 0)
+        && length == len(hd(cur->path))
+        && strncmp(next_key, hd(hd(cur->path)), length) == 0)
     {
         if (next(cur->path) == NULL && cur->path_parent == NULL) {
             // this will only run once since path_parent is the same for every row

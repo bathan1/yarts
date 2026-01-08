@@ -37,6 +37,11 @@ struct str {
 struct str str(const char *fmt, ...);
 
 /**
+ * @brief Move HD of length LENGTH into a struct #str
+ */
+struct str strn(char *hd, size_t length);
+
+/**
  * Canonical empty string view. Safe to use everywhere.
  */
 extern const struct str STR_EMPTY;
@@ -200,7 +205,7 @@ bool __queue_insert(struct queue *q, struct str s);
 /**
  * @brief Get the underyling "value" of ITER.
  */
-#define get(iter) \
+#define hd(iter) \
     _Generic((iter), \
         struct str: __str_get, \
         struct list *: __list_get, \

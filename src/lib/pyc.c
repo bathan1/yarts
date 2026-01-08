@@ -64,6 +64,10 @@ struct str str(const char *fmt, ...) {
     };
 }
 
+struct str strn(char *hd, size_t length) {
+    return (struct str) {.hd=hd, .length=length};
+}
+
 struct str __str_next(struct str s) {
     if (s.length == 0 || s.hd[0] == '\0') {
         return (struct str) {
@@ -82,7 +86,7 @@ size_t __str_len(struct str s) {
     return s.length;
 }
 
-const char *__str_get(struct str s) {
+char *__str_get(struct str s) {
     return s.hd;
 }
 

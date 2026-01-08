@@ -22,11 +22,11 @@ void url_free(struct url *url) {
         return;
     }
 
-    if (url->host.hd) free(url->host.hd);
-    if (url->protocol.hd) free(url->protocol.hd);
-    if (url->hostname.hd) free(url->hostname.hd);
-    if (url->pathname.hd) free(url->pathname.hd);
-    if (url->port.hd) free(url->port.hd);
+    done(url->host);
+    done(url->protocol);
+    done(url->hostname);
+    done(url->pathname);
+    done(url->port);
 }
 
 void dispatch_free(struct dispatch *dispatch) {
@@ -53,7 +53,10 @@ struct dispatch *fetch_socket(const char *url, const char *init[4]) {
         return NULL;
     }
     disp->url = *URL;
-    if (tcp_getaddrinfo(disp->url.hostname.hd, disp->url.port.hd, &disp->addrinfo)) {
+
+    char *hostname = hd(disp->url.hostname);
+    char *port = hd(disp->url.port);
+    if (tcp_getaddrinfo(hostname, port, &disp->addrinfo)) {
         dispatch_free(disp);
         return NULL;
     }
@@ -75,10 +78,11 @@ static int set_nonblocking(int fd) {
 }
 
 int use_fetch(int fds[4], struct dispatch *dispatch) {
-    bool is_tls = strncmp(dispatch->url.protocol.hd, "https:", 6) == 0;
+    char *protocol = hd(dispatch->url.protocol);
+    bool is_tls = strncmp(protocol, "https:", 6) == 0;
     SSL **ssl = is_tls ? &dispatch->ssl : NULL;
     SSL_CTX **ctx = is_tls ? &dispatch->ctx : NULL;
-    const char *hostname = is_tls ? dispatch->url.hostname.hd : NULL;
+    const char *hostname = is_tls ? hd(dispatch->url.hostname) : NULL;
     if (tcp_connect(
         dispatch->sockfd, dispatch->addrinfo->ai_addr, dispatch->addrinfo->ai_addrlen,
         ssl, ctx, hostname) < 0)
@@ -101,26 +105,26 @@ int use_fetch(int fds[4], struct dispatch *dispatch) {
         "Accept: */*\r\n"
         "Connection: close\r\n"
         "\r\n",
-        dispatch->url.pathname.hd,
-        dispatch->url.host.hd
+        hd(dispatch->url.pathname),
+        hd(dispatch->url.host)
     );
-    if (!GET.hd) {
+    if (!hd(GET)) {
         close(dispatch->sockfd);
         dispatch_free(dispatch);
         return -1;
     }
 
-    if (tcp_send(dispatch->sockfd, GET.hd, GET.length, is_tls ? *ssl : NULL) < 0) {
+    if (tcp_send(dispatch->sockfd, hd(GET), len(GET), is_tls ? *ssl : NULL) < 0) {
         close(dispatch->sockfd);
         dispatch_free(dispatch);
         return -1;
     }
 
-    free(GET.hd);
+    done(GET);
 
     int sv[2] = {0};
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
-        fprintf(stderr, "couldn't open socketpair for url: %s\n", dispatch->url.hostname.hd);
+        fprintf(stderr, "couldn't open socketpair for url: %s\n", hd(dispatch->url.hostname));
         close(dispatch->sockfd);
         dispatch_free(dispatch);
         return -1;
