@@ -21,8 +21,8 @@ SQLITE_EXTENSION_INIT1
 #include <wchar.h>
 
 #define FETCH_URL 0
-#define FETCH_BODY 1
-#define FETCH_HEADERS 2
+#define FETCH_HEADERS 1
+#define FETCH_BODY 2
 
 /* For debug logs */
 
@@ -173,11 +173,18 @@ static int xCreate(sqlite3 *pdb, void *paux, int argc,
     return xConnect(pdb, paux, argc, argv, pp_vtab, pz_err);
 }
 
-
-/* To inline index checkers for x_index() */
-static bool is_url_set_index_constraint(struct sqlite3_index_constraint *cst) {
+static bool is_usable_eq_cst(struct sqlite3_index_constraint *cst, uint index) {
     return (
-        cst->iColumn == FETCH_URL // column index
+        cst->iColumn == index // column index
+        && cst->op == // was the operator '='?
+            SQLITE_INDEX_CONSTRAINT_EQ
+        && cst->usable
+    );
+}
+
+static bool is_body_set_index_constraint(struct sqlite3_index_constraint *cst) {
+    return (
+        cst->iColumn == FETCH_BODY // column index
         && cst->op == // was the operator '='?
             SQLITE_INDEX_CONSTRAINT_EQ
         && cst->usable
@@ -239,10 +246,16 @@ static int xBestIndex(sqlite3_vtab *pVTab, sqlite3_index_info *pIdxInfo) {
         struct sqlite3_index_constraint_usage *usage =
             &pIdxInfo->aConstraintUsage[i];
 
-        if (is_url_set_index_constraint(cst)) {
+        if (is_usable_eq_cst(cst, FETCH_URL)) {
             usage->omit = 1;
             usage->argvIndex = argPos++;
             planMask |= 0b01;
+        } 
+
+        if (is_usable_eq_cst(cst, FETCH_BODY)) {
+            usage->omit = 1;
+            usage->argvIndex = argPos++;
+            planMask |= 0b0100;
         } 
     }
 
@@ -452,13 +465,14 @@ static int xFilter(sqlite3_vtab_cursor *cur0,
     // Extract URL
     if (argc == 0 && !vtab->column_defs[FETCH_URL].default_value.hd) {
         cur0->pVtab->zErrMsg =
-            sqlite3_mprintf("fetch: need at least 1 argument or default url");
+            sqlite3_mprintf("(vttp) need at least 1 argument or default url");
         return SQLITE_ERROR;
     }
 
-    const char *url = (argc > 0)
-        ? (const char*)sqlite3_value_text(argv[0])
-        : vtab->column_defs[FETCH_URL].default_value.hd;
+    struct str default_url = vtab->column_defs[FETCH_URL].default_value;
+    const char *url = (argc > 0 && len(default_url) == 0)
+        ? (const char*) sqlite3_value_text(argv[0])
+        : hd(default_url);
 
     Cur->stream = fetch(url, (const char *[]){0});
 
