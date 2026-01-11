@@ -8,4 +8,9 @@ CREATE VIRTUAL TABLE patients USING vttp (
 );
 
 SELECT * FROM patients 
-WHERE url = 'https://r4.smarthealthit.org/Patient' and body = '$.entry[*].resource';
+WHERE url = 'https://r4.smarthealthit.org/Patient' 
+and body = (
+    SELECT resource.*
+    FROM json_each($->'entry') as entry,
+         json_each(entry->'resource') as resource;
+);

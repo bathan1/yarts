@@ -21,7 +21,7 @@ SQLITE_EXTENSION_INIT1
 #include <string.h>
 #include <wchar.h>
 
-yyjson_doc *read_next_json_object(FILE *stream, char **errmsg) {
+yyjson_doc *next_json_obj(FILE *stream, char **errmsg) {
     char *buf = NULL;
     size_t cap = 0;
 
@@ -73,10 +73,10 @@ typedef struct {
     size_t column_defs_count;
 
     uint icol_to_arg_index[4];
-} Fetch;
+} vttp_vtab;
 
 /// Cursor
-typedef struct fetch_cursor {
+typedef struct vttp_cursor {
     sqlite3_vtab_cursor base;
     FILE *stream;
     unsigned int count;
@@ -84,27 +84,23 @@ typedef struct fetch_cursor {
 
     // Completed row (a fully constructed immutable doc)
     yyjson_doc *next_doc;
-} fetch_cursor_t;
+} vttp_cursor_t;
 
 #define X_UPDATE_OFFSET 2
 
-// For tokens "fetch" (module name), "main" (schema), "patients" (vtable name), and
+// For tokens "vttp" (module name), "main" (schema), "patients" (vtable name), and
 // at least 1 argument for the url argument
 #define MIN_ARGC 4
 
-// "fetch", "{schema}", "{vtable_name}", "{?url}", "{?body}",
-// "{?headers}", ... optional static column declarations
-#define MAX_FETCH_ARGC 6
-
-static Fetch *init_fetch_vtab(sqlite3 *db, int argc,
+static vttp_vtab *vttp_vtab_init(sqlite3 *db, int argc,
                           const char *const *argv, char **schema)
 {
-    Fetch *vtab = sqlite3_malloc(sizeof(Fetch));
+    vttp_vtab *vtab = sqlite3_malloc(sizeof(vttp_vtab));
     if (!vtab) {
         fprintf(stderr, "sqlite3_malloc() out of memory\n");
         return NULL;
     }
-    memset(vtab, 0, sizeof(Fetch));
+    memset(vtab, 0, sizeof(vttp_vtab));
 
     // DELETEME
     vtab->column_defs = parse_column_defs(argc, argv, &vtab->column_defs_count);
@@ -138,7 +134,7 @@ static Fetch *init_fetch_vtab(sqlite3 *db, int argc,
     return vtab;
 }
 
-static int xConnect(sqlite3 *pdb, void *paux, int argc,
+static int vttpConnect(sqlite3 *pdb, void *paux, int argc,
                      const char *const *argv, sqlite3_vtab **pp_vtab,
                      char **pz_err)
 {
@@ -148,8 +144,8 @@ static int xConnect(sqlite3 *pdb, void *paux, int argc,
     }
     int rc = SQLITE_OK;
     char *schema = NULL;
-    *pp_vtab = (sqlite3_vtab *) init_fetch_vtab(pdb, argc, argv, &schema);
-    Fetch *vtab = (Fetch *) *pp_vtab;
+    *pp_vtab = (sqlite3_vtab *) vttp_vtab_init(pdb, argc, argv, &schema);
+    vttp_vtab *vtab = (vttp_vtab *) *pp_vtab;
     if (!vtab) {
         return SQLITE_NOMEM;
     }
@@ -164,11 +160,11 @@ static int xConnect(sqlite3 *pdb, void *paux, int argc,
  * Same implementation as xConnect, we just have to point to different fns so this isn't 
  * eponymous (can't be called as its own table e.g. SELECT * FROM fetch).
  */
-static int xCreate(sqlite3 *pdb, void *paux, int argc,
+static int vttpCreate(sqlite3 *pdb, void *paux, int argc,
                      const char *const *argv, sqlite3_vtab **pp_vtab,
                      char **pz_err)
 {
-    return xConnect(pdb, paux, argc, argv, pp_vtab, pz_err);
+    return vttpConnect(pdb, paux, argc, argv, pp_vtab, pz_err);
 }
 
 static bool is_usable_eq_cst(struct sqlite3_index_constraint *cst, uint index) {
@@ -187,7 +183,7 @@ static bool is_usable_eq_cst(struct sqlite3_index_constraint *cst, uint index) {
 static int check_plan_mask(struct sqlite3_index_info *index_info,
                            sqlite3_vtab *pVtab)
 {
-    Fetch *vtab = (void *) pVtab;
+    vttp_vtab *vtab = (void *) pVtab;
     if ((index_info->idxNum & REQUIRED_BITS) == REQUIRED_BITS
         || (vtab->column_defs[ICOL_URL].default_value.length > 0))
         return SQLITE_OK; // Then either a `where url = ...` or a default value was set (or both)
@@ -220,10 +216,10 @@ static int check_plan_mask(struct sqlite3_index_info *index_info,
 /**
  * Fetch vtab's sqlite_module->xBestIndex() callback
  */
-static int xBestIndex(sqlite3_vtab *pVTab, sqlite3_index_info *pIdxInfo) {
+static int vttpBestIndex(sqlite3_vtab *pVTab, sqlite3_index_info *pIdxInfo) {
     int argPos = 1;
     int planMask = 0;
-    Fetch *vtab = (Fetch *)pVTab;
+    vttp_vtab *vtab = (vttp_vtab *)pVTab;
 
     for (int i = 0; i < pIdxInfo->nConstraint; i++) {
         struct sqlite3_index_constraint *cst = &pIdxInfo->aConstraint[i];
@@ -257,8 +253,8 @@ static int xBestIndex(sqlite3_vtab *pVTab, sqlite3_index_info *pIdxInfo) {
  * Cleanup virtual table state pointed to be P_VTAB.
  * Serves as both xDestroy and xDisconnect for the vtable.
  */
-static int xDisconnect(sqlite3_vtab *pvtab) {
-    Fetch *vtab = (Fetch *) pvtab;
+static int vttpDisconnect(sqlite3_vtab *pvtab) {
+    vttp_vtab *vtab = (vttp_vtab *) pvtab;
 
     for (uint i = 3; i < vtab->column_defs_count; i++) {
         done(vtab->column_defs[i].default_value);
@@ -276,13 +272,13 @@ static int xDisconnect(sqlite3_vtab *pvtab) {
 /**
  * Initialize fetch cursor at P_VTAB's cursor PP_CURSOR with count = 0.
  */
-static int xOpen(sqlite3_vtab *pvtab, sqlite3_vtab_cursor **pp_cursor) {
-    Fetch *fetch = (Fetch *) pvtab;
-    fetch_cursor_t *cur = sqlite3_malloc(sizeof(fetch_cursor_t));
+static int vttpOpen(sqlite3_vtab *pvtab, sqlite3_vtab_cursor **pp_cursor) {
+    vttp_vtab *fetch = (vttp_vtab *) pvtab;
+    vttp_cursor_t *cur = sqlite3_malloc(sizeof(vttp_cursor_t));
     if (!cur) {
         return SQLITE_NOMEM;
     }
-    memset(cur, 0, sizeof(fetch_cursor_t));
+    memset(cur, 0, sizeof(vttp_cursor_t));
 
     cur->count = 0;
 
@@ -291,8 +287,8 @@ static int xOpen(sqlite3_vtab *pvtab, sqlite3_vtab_cursor **pp_cursor) {
     return SQLITE_OK;
 }
 
-static int xClose(sqlite3_vtab_cursor *cur) {
-    fetch_cursor_t *cursor = (fetch_cursor_t *)cur;
+static int vttpClose(sqlite3_vtab_cursor *cur) {
+    vttp_cursor_t *cursor = (vttp_cursor_t *)cur;
     if (cursor) {
         if (cursor->next_doc) {
             yyjson_doc_free(cursor->next_doc);
@@ -305,9 +301,9 @@ static int xClose(sqlite3_vtab_cursor *cur) {
     return SQLITE_OK;
 }
 
-static int xNext(sqlite3_vtab_cursor *cur0) {
-    fetch_cursor_t *cur = (fetch_cursor_t*)cur0;
-    Fetch *vtab = (void*) cur->base.pVtab;
+static int vttpNext(sqlite3_vtab_cursor *cur0) {
+    vttp_cursor_t *cur = (vttp_cursor_t*)cur0;
+    vttp_vtab *vtab = (void*) cur->base.pVtab;
 
 
     // Sanity: next_doc must always contain the row returned previously.
@@ -320,7 +316,7 @@ static int xNext(sqlite3_vtab_cursor *cur0) {
 
     yyjson_doc *prev = cur->next_doc;
     char *errmsg = NULL;
-    cur->next_doc = read_next_json_object(cur->stream, &errmsg);
+    cur->next_doc = next_json_obj(cur->stream, &errmsg);
     yyjson_doc_free(prev);
 
     return SQLITE_OK;
@@ -364,8 +360,8 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
                     sqlite3_context *pctx,
                     int icol)
 {
-    fetch_cursor_t *cursor = (fetch_cursor_t *)pcursor;
-    Fetch *vtab = (void *) cursor->base.pVtab;
+    vttp_cursor_t *cursor = (vttp_cursor_t *)pcursor;
+    vttp_vtab *vtab = (void *) cursor->base.pVtab;
 
     if (!cursor->next_doc) {
         fprintf(stderr, "expected a JSON pointer in next_doc but got 0\n");
@@ -431,19 +427,19 @@ static int xColumn(sqlite3_vtab_cursor *pcursor,
 
 
 static int xEof(sqlite3_vtab_cursor *cur) {
-    fetch_cursor_t *c = (fetch_cursor_t*)cur;
+    vttp_cursor_t *c = (vttp_cursor_t*)cur;
     int rc = c->next_doc == NULL;
     return rc;
 }
 
 static int xRowid(sqlite3_vtab_cursor *pcursor, sqlite3_int64 *prowid) {
-    *prowid = ((fetch_cursor_t *)pcursor)->count;
+    *prowid = ((vttp_cursor_t *)pcursor)->count;
     return SQLITE_OK;
 }
 
 static inline char *
 resolve_hidden_col_text(
-    const Fetch *vtab,
+    const vttp_vtab *vtab,
     uint icol,
     int argc,
     sqlite3_value **argv
@@ -461,8 +457,8 @@ static int xFilter(sqlite3_vtab_cursor *_cur,
                     int idxNum, const char *idxStr,
                     int argc, sqlite3_value **argv)
 {
-    Fetch *vtab = (Fetch*)_cur->pVtab;
-    fetch_cursor_t *cur = (fetch_cursor_t*)_cur;
+    vttp_vtab *vtab = (vttp_vtab*)_cur->pVtab;
+    vttp_cursor_t *cur = (vttp_cursor_t*)_cur;
 
     cur->eof = 0, cur->count = 0, cur->next_doc = NULL;
 
@@ -482,7 +478,7 @@ static int xFilter(sqlite3_vtab_cursor *_cur,
     cur->stream = fetch(url, (const char *[]){0}, json_response);
 
     char *errmsg = NULL;
-    cur->next_doc = read_next_json_object(cur->stream, &errmsg);
+    cur->next_doc = next_json_obj(cur->stream, &errmsg);
 
     if (!cur->next_doc) {
         _cur->pVtab->zErrMsg = errmsg;
@@ -492,17 +488,17 @@ static int xFilter(sqlite3_vtab_cursor *_cur,
     return SQLITE_OK;
 }
 
-static sqlite3_module fetch_vtab_module = {
+static sqlite3_module vttp = {
     .iVersion=0,
-    .xCreate=xCreate,
-    .xConnect=xConnect,
-    .xBestIndex=xBestIndex,
-    .xDisconnect=xDisconnect,
-    .xDestroy=xDisconnect,
-    .xOpen=xOpen,
-    .xClose=xClose,
+    .xCreate=vttpCreate,
+    .xConnect=vttpConnect,
+    .xBestIndex=vttpBestIndex,
+    .xDisconnect=vttpDisconnect,
+    .xDestroy=vttpDisconnect,
+    .xOpen=vttpOpen,
+    .xClose=vttpClose,
     .xFilter=xFilter,
-    .xNext=xNext,
+    .xNext=vttpNext,
     .xEof=xEof,
     .xColumn=xColumn,
     .xRowid=xRowid,
@@ -519,6 +515,6 @@ int sqlite3_vttp_init(sqlite3 *db, char **pzErrMsg,
                        const sqlite3_api_routines *pApi) {
     SQLITE_EXTENSION_INIT2(pApi);
     // oh yeah baby
-    int rc = sqlite3_create_module(db, "vttp", &fetch_vtab_module, 0);
+    int rc = sqlite3_create_module(db, "vttp", &vttp, 0);
     return rc;
 }
